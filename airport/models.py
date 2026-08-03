@@ -1,6 +1,9 @@
 import os
 import uuid
+from datetime import timedelta
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 
@@ -27,10 +30,7 @@ class Country(models.Model):
         default=uuid.uuid4,
         editable=False,
     )
-    name = models.CharField(
-        max_length=255,
-        unique=True
-    )
+    name = models.CharField(max_length=255, unique=True)
 
     class Meta:
         verbose_name_plural = "countries"
@@ -50,9 +50,7 @@ class City(models.Model):
         max_length=255,
     )
     country = models.ForeignKey(
-        Country,
-        on_delete=models.PROTECT,
-        related_name="cities"
+        Country, on_delete=models.PROTECT, related_name="cities"
     )
 
     class Meta:
@@ -60,8 +58,7 @@ class City(models.Model):
         ordering = ["name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["name", "country"],
-                name="unique_city_name_country"
+                fields=["name", "country"], name="unique_city_name_country"
             ),
         ]
 
@@ -75,14 +72,9 @@ class Airport(models.Model):
         default=uuid.uuid4,
         editable=False,
     )
-    name = models.CharField(
-        max_length=255,
-        unique=True
-    )
+    name = models.CharField(max_length=255, unique=True)
     closest_big_city = models.ForeignKey(
-        City,
-        on_delete=models.PROTECT,
-        related_name="airports"
+        City, on_delete=models.PROTECT, related_name="airports"
     )
 
     class Meta:
@@ -91,10 +83,7 @@ class Airport(models.Model):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"{self.name} (closest city: "
-            f"{self.closest_big_city.name})"
-        )
+        return f"{self.name} (closest city: " f"{self.closest_big_city.name})"
 
 
 class AirplaneType(models.Model):
@@ -132,15 +121,9 @@ class Airplane(models.Model):
     rows = models.PositiveIntegerField()
     seats_in_row = models.PositiveIntegerField()
     airplane_type = models.ForeignKey(
-        AirplaneType,
-        on_delete=models.PROTECT,
-        related_name="airplanes"
+        AirplaneType, on_delete=models.PROTECT, related_name="airplanes"
     )
-    image = models.ImageField(
-        null=True,
-        blank=True,
-        upload_to=airplane_image_file_path
-    )
+    image = models.ImageField(null=True, blank=True, upload_to=airplane_image_file_path)
 
     @property
     def capacity(self) -> int:
@@ -154,4 +137,183 @@ class Airplane(models.Model):
             f"{self.name} | {self.airplane_type.name}"
             f" (rows: {self.rows}, seats in row: "
             f"{self.seats_in_row})"
+        )
+
+
+class Route(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    source = models.ForeignKey(
+        Airport,
+        on_delete=models.PROTECT,
+        related_name="source_routes",
+    )
+    destination = models.ForeignKey(
+        Airport,
+        on_delete=models.PROTECT,
+        related_name="destination_routes",
+    )
+    distance = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "destination"], name="unique_route_source_destination"
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if (
+            self.source_id
+            and self.destination_id
+            and self.source_id == self.destination_id
+        ):
+            raise ValidationError(
+                {
+                    "destination": ["Destination must differ from source."],
+                }
+            )
+
+    def __str__(self) -> str:
+        return (
+            f"Source: {self.source}; "
+            f"Destination: {self.destination}; "
+            f"Distance: {self.distance}"
+        )
+
+
+class Flight(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    route = models.ForeignKey(
+        Route,
+        on_delete=models.PROTECT,
+        related_name="flights",
+    )
+    airplane = models.ForeignKey(
+        Airplane,
+        on_delete=models.PROTECT,
+        related_name="flights",
+    )
+    departure_time = models.DateTimeField()
+    arrival_time = models.DateTimeField()
+    crew = models.ManyToManyField(
+        Crew,
+        related_name="flights",
+    )
+
+    @property
+    def flight_duration(self) -> timedelta:
+        return self.arrival_time - self.departure_time
+
+    class Meta:
+        ordering = ["-departure_time"]
+
+    def clean(self) -> None:
+        super().clean()
+
+        if (
+            self.departure_time
+            and self.arrival_time
+            and self.arrival_time <= self.departure_time
+        ):
+            raise ValidationError(
+                {
+                    "arrival_time": ["Arrival time must be later than departure time."],
+                }
+            )
+
+    def __str__(self) -> str:
+        return (
+            f"Flight '{self.route.source.closest_big_city}-"
+            f"{self.route.destination.closest_big_city}' "
+            f"(departure time: {self.departure_time}; "
+            f"arrival time: {self.arrival_time})"
+        )
+
+
+class Order(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="orders",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Order created at {self.created_at} by {self.user.email}"
+
+
+class Ticket(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    row = models.PositiveIntegerField()
+    seat = models.PositiveIntegerField()
+    flight = models.ForeignKey(
+        Flight,
+        on_delete=models.PROTECT,
+        related_name="tickets",
+    )
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="tickets",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["flight", "row", "seat"], name="unique_ticket_flight_row_seat"
+            )
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+
+        if self.flight_id:
+            airplane_rows = self.flight.airplane.rows
+            airplane_seats_in_row = self.flight.airplane.seats_in_row
+
+            if airplane_rows < self.row or self.row < 1:
+                raise ValidationError(
+                    {
+                        "row": [
+                            f"Current row ({self.row}) must be between "
+                            f"1 and airplane rows count ({airplane_rows})"
+                        ]
+                    }
+                )
+
+            if airplane_seats_in_row < self.seat or self.seat < 1:
+                raise ValidationError(
+                    {
+                        "seat": [
+                            f"Current seat ({self.seat}) must be between "
+                            f"1 and seats in row count ({airplane_seats_in_row})"
+                        ]
+                    }
+                )
+
+    def __str__(self) -> str:
+        return (
+            f"Ticket for flight: |{self.flight}|"
+            f" (row: {self.row}, seat: {self.seat})"
         )
