@@ -1,11 +1,23 @@
-import os
 import uuid
 from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils.text import slugify
+
+from airport.utils.files import generate_image_file_path
+
+
+def crew_photo_file_path(
+    instance: "Crew",
+    filename: str,
+) -> str:
+    full_name = f"{instance.first_name}-{instance.last_name}"
+    return generate_image_file_path(
+        full_name,
+        filename,
+        "uploads/crews"
+    )
 
 
 class Crew(models.Model):
@@ -16,6 +28,11 @@ class Crew(models.Model):
     )
     first_name = models.CharField(max_length=255)
     last_name = models.CharField(max_length=255)
+    photo = models.ImageField(
+        null=True,
+        blank=True,
+        upload_to=crew_photo_file_path
+    )
 
     class Meta:
         ordering = ["first_name", "last_name"]
@@ -66,6 +83,16 @@ class City(models.Model):
         return f"{self.name} ({self.country.name})"
 
 
+def airport_image_file_path(
+    instance: "Airport",
+    filename: str,
+) -> str:
+    return generate_image_file_path(
+        instance.name,
+        filename,
+        "uploads/airports"
+    )
+
 class Airport(models.Model):
     id = models.UUIDField(
         primary_key=True,
@@ -75,6 +102,11 @@ class Airport(models.Model):
     name = models.CharField(max_length=255, unique=True)
     closest_big_city = models.ForeignKey(
         City, on_delete=models.PROTECT, related_name="airports"
+    )
+    image = models.ImageField(
+        null=True,
+        blank=True,
+        upload_to=airport_image_file_path
     )
 
     class Meta:
@@ -105,10 +137,11 @@ def airplane_image_file_path(
     instance: "Airplane",
     filename: str,
 ) -> str:
-    _, extension = os.path.splitext(filename)
-    filename = f"{slugify(instance.name)}-{uuid.uuid4()}{extension}"
-
-    return os.path.join("uploads/airplanes", filename)
+    return generate_image_file_path(
+        instance.name,
+        filename,
+        "uploads/airplanes"
+    )
 
 
 class Airplane(models.Model):
@@ -121,9 +154,15 @@ class Airplane(models.Model):
     rows = models.PositiveIntegerField()
     seats_in_row = models.PositiveIntegerField()
     airplane_type = models.ForeignKey(
-        AirplaneType, on_delete=models.PROTECT, related_name="airplanes"
+        AirplaneType,
+        on_delete=models.PROTECT,
+        related_name="airplanes"
     )
-    image = models.ImageField(null=True, blank=True, upload_to=airplane_image_file_path)
+    image = models.ImageField(
+        null=True,
+        blank=True,
+        upload_to=airplane_image_file_path
+    )
 
     @property
     def capacity(self) -> int:
