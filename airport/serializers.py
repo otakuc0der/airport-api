@@ -1,5 +1,7 @@
 from typing import Any
+from uuid import UUID
 
+from django.db import transaction
 from rest_framework import serializers
 
 from airport.models import (
@@ -339,12 +341,80 @@ class TicketListSerializer(TicketSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    tickets = TicketSerializer(
+        many=True,
+        allow_empty=False,
+    )
+
     class Meta:
         model = Order
         fields = [
             "id",
-            "created_at"
+            "tickets",
+            "created_at",
         ]
+        read_only_fields = [
+            "id",
+            "created_at",
+        ]
+
+    def validate_tickets(
+        self,
+        tickets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        requested_seats: set[tuple[UUID, int, int]] = set()
+
+        for ticket in tickets:
+            flight = ticket["flight"]
+            row = ticket["row"]
+            seat = ticket["seat"]
+
+            seat_key = (
+                flight.pk,
+                row,
+                seat,
+            )
+
+            if seat_key in requested_seats:
+                raise serializers.ValidationError(
+                    (
+                        f"Seat {row}-{seat} is duplicated "
+                        "in this order."
+                    )
+                )
+
+            if Ticket.objects.filter(
+                flight=flight,
+                row=row,
+                seat=seat,
+            ).exists():
+                raise serializers.ValidationError(
+                    (
+                        f"Seat {row}-{seat} is already booked "
+                        "for this flight."
+                    )
+                )
+
+            requested_seats.add(seat_key)
+
+        return tickets
+
+    def create(
+        self,
+        validated_data: dict[str, Any],
+    ) -> Order:
+        tickets_data = validated_data.pop("tickets")
+
+        with transaction.atomic():
+            order = Order.objects.create(**validated_data)
+
+            for ticket_data in tickets_data:
+                Ticket.objects.create(
+                    order=order,
+                    **ticket_data,
+                )
+
+        return order
 
 
 class OrderListSerializer(OrderSerializer):
@@ -354,7 +424,7 @@ class OrderListSerializer(OrderSerializer):
         fields = [
             "id",
             "tickets_count",
-            "created_at"
+            "created_at",
         ]
 
 
@@ -365,5 +435,5 @@ class OrderDetailSerializer(OrderSerializer):
         fields = [
             "id",
             "tickets",
-            "created_at"
+            "created_at",
         ]
