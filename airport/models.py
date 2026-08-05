@@ -6,6 +6,10 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from airport.utils.files import generate_image_file_path
+from airport.utils.validators import (
+    validate_route_source_destination,
+    validate_flight_departure_and_arrival_time
+)
 
 
 def crew_photo_file_path(
@@ -33,6 +37,10 @@ class Crew(models.Model):
         blank=True,
         upload_to=crew_photo_file_path
     )
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}"
 
     class Meta:
         ordering = ["first_name", "last_name"]
@@ -92,6 +100,7 @@ def airport_image_file_path(
         filename,
         "uploads/airports"
     )
+
 
 class Airport(models.Model):
     id = models.UUIDField(
@@ -206,16 +215,22 @@ class Route(models.Model):
 
     def clean(self) -> None:
         super().clean()
-        if (
-            self.source_id
-            and self.destination_id
-            and self.source_id == self.destination_id
-        ):
-            raise ValidationError(
-                {
-                    "destination": ["Destination must differ from source."],
-                }
-            )
+        validate_route_source_destination(
+            self.source_id,
+            self.destination_id,
+            ValidationError
+        )
+
+        # if (
+        #     self.source_id
+        #     and self.destination_id
+        #     and self.source_id == self.destination_id
+        # ):
+        #     raise ValidationError(
+        #         {
+        #             "destination": ["Destination must differ from source."],
+        #         }
+        #     )
 
     def __str__(self) -> str:
         return (
@@ -257,17 +272,21 @@ class Flight(models.Model):
 
     def clean(self) -> None:
         super().clean()
-
-        if (
-            self.departure_time
-            and self.arrival_time
-            and self.arrival_time <= self.departure_time
-        ):
-            raise ValidationError(
-                {
-                    "arrival_time": ["Arrival time must be later than departure time."],
-                }
-            )
+        validate_flight_departure_and_arrival_time(
+            self.departure_time,
+            self.arrival_time,
+            ValidationError
+        )
+        # if (
+        #     self.departure_time
+        #     and self.arrival_time
+        #     and self.arrival_time <= self.departure_time
+        # ):
+        #     raise ValidationError(
+        #         {
+        #             "arrival_time": ["Arrival time must be later than departure time."],
+        #         }
+        #     )
 
     def __str__(self) -> str:
         return (

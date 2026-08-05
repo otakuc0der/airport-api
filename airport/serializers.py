@@ -1,12 +1,20 @@
+from typing import Any
+
 from rest_framework import serializers
 
 from airport.models import (
-    Crew,
-    Country,
-    City,
-    Airport,
-    AirplaneType,
     Airplane,
+    AirplaneType,
+    Airport,
+    City,
+    Country,
+    Crew,
+    Flight,
+    Route,
+)
+from airport.utils.validators import (
+    validate_flight_departure_and_arrival_time,
+    validate_route_source_destination,
 )
 
 
@@ -35,7 +43,7 @@ class CityDetailSerializer(CitySerializer):
 
 class AirportSerializer(serializers.ModelSerializer):
     closest_big_city = serializers.PrimaryKeyRelatedField(
-        queryset=City.objects.select_related("country")
+        queryset=City.objects.select_related("country"),
     )
 
     class Meta:
@@ -44,10 +52,7 @@ class AirportSerializer(serializers.ModelSerializer):
 
 
 class AirportListSerializer(AirportSerializer):
-    closest_big_city = serializers.SlugRelatedField(
-        read_only=True,
-        slug_field="name"
-    )
+    closest_big_city = serializers.SlugRelatedField(read_only=True, slug_field="name")
 
 
 class AirportDetailSerializer(AirportSerializer):
@@ -61,6 +66,8 @@ class AirplaneTypeSerializer(serializers.ModelSerializer):
 
 
 class AirplaneSerializer(serializers.ModelSerializer):
+    capacity = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Airplane
         fields = [
@@ -93,4 +100,184 @@ class CrewSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "photo",
+        ]
+
+
+class CrewListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Crew
+        fields = [
+            "id",
+            "full_name",
+            "photo",
+        ]
+
+
+class RouteSerializer(serializers.ModelSerializer):
+    source = serializers.PrimaryKeyRelatedField(
+        queryset=Airport.objects.select_related("closest_big_city"),
+    )
+    destination = serializers.PrimaryKeyRelatedField(
+        queryset=Airport.objects.select_related("closest_big_city"),
+    )
+
+    class Meta:
+        model = Route
+        fields = [
+            "id",
+            "source",
+            "destination",
+            "distance",
+        ]
+
+    def validate(
+        self,
+        attrs: dict[str, Any],
+    ) -> dict[str, Any]:
+        source = attrs.get("source")
+        destination = attrs.get("destination")
+
+        if self.instance is not None:
+            source = attrs.get(
+                "source",
+                self.instance.source,
+            )
+            destination = attrs.get(
+                "destination",
+                self.instance.destination,
+            )
+
+        validate_route_source_destination(
+            source,
+            destination,
+            serializers.ValidationError,
+        )
+
+        return attrs
+
+
+class RouteListSerializer(RouteSerializer):
+    source_city = serializers.CharField(
+        read_only=True, source="source.closest_big_city.name"
+    )
+    destination_city = serializers.CharField(
+        read_only=True, source="destination.closest_big_city.name"
+    )
+    source_airport = serializers.CharField(read_only=True, source="source.name")
+    destination_airport = serializers.CharField(
+        read_only=True, source="destination.name"
+    )
+
+    class Meta(RouteSerializer.Meta):
+        fields = [
+            "id",
+            "source_city",
+            "destination_city",
+            "source_airport",
+            "destination_airport",
+            "distance",
+        ]
+
+
+class RouteDetailSerializer(RouteSerializer):
+    source = AirportDetailSerializer(read_only=True)
+    destination = AirportDetailSerializer(read_only=True)
+
+
+class FlightSerializer(serializers.ModelSerializer):
+    route = serializers.PrimaryKeyRelatedField(
+        queryset=Route.objects.select_related(
+            "source__closest_big_city", "destination__closest_big_city"
+        ),
+    )
+    airplane = serializers.PrimaryKeyRelatedField(
+        queryset=Airplane.objects.select_related("airplane_type"),
+    )
+    crew = serializers.PrimaryKeyRelatedField(
+        queryset=Crew.objects.all(),
+        many=True,
+    )
+
+    class Meta:
+        model = Flight
+        fields = [
+            "id",
+            "route",
+            "airplane",
+            "departure_time",
+            "arrival_time",
+            "crew",
+        ]
+
+    def validate(
+        self,
+        attrs: dict[str, Any],
+    ) -> dict[str, Any]:
+        departure_time = attrs.get("departure_time")
+        arrival_time = attrs.get("arrival_time")
+
+        if self.instance is not None:
+            departure_time = attrs.get(
+                "departure_time",
+                self.instance.departure_time,
+            )
+            arrival_time = attrs.get(
+                "arrival_time",
+                self.instance.arrival_time,
+            )
+
+        validate_flight_departure_and_arrival_time(
+            departure_time,
+            arrival_time,
+            serializers.ValidationError,
+        )
+
+        return attrs
+
+
+class FlightListSerializer(FlightSerializer):
+    source = serializers.CharField(
+        read_only=True, source="route.source.closest_big_city.name"
+    )
+    destination = serializers.CharField(
+        read_only=True, source="route.destination.closest_big_city.name"
+    )
+    airplane = serializers.SlugRelatedField(read_only=True, slug_field="name")
+    airplane_type = serializers.CharField(
+        read_only=True, source="airplane.airplane_type.name"
+    )
+    crew = serializers.SlugRelatedField(
+        many=True, read_only=True, slug_field="full_name"
+    )
+    flight_duration = serializers.DurationField(read_only=True)
+
+    class Meta(FlightSerializer.Meta):
+        fields = [
+            "id",
+            "source",
+            "destination",
+            "airplane",
+            "airplane_type",
+            "crew",
+            "departure_time",
+            "arrival_time",
+            "flight_duration",
+        ]
+
+
+class FlightDetailSerializer(FlightSerializer):
+    route = RouteDetailSerializer(read_only=True)
+    airplane = AirplaneDetailSerializer(read_only=True)
+    flight_duration = serializers.DurationField(read_only=True)
+    crew = CrewSerializer(many=True, read_only=True)
+
+    class Meta(FlightSerializer.Meta):
+        fields = [
+            "id",
+            "route",
+            "airplane",
+            "departure_time",
+            "arrival_time",
+            "flight_duration",
+            "crew",
         ]
