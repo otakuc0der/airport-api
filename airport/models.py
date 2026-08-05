@@ -1,5 +1,6 @@
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -8,7 +9,8 @@ from django.db import models
 from airport.utils.files import generate_image_file_path
 from airport.utils.validators import (
     validate_route_source_destination,
-    validate_flight_departure_and_arrival_time
+    validate_flight_departure_and_arrival_time,
+    validate_ticket_rows_and_seats_in_row
 )
 
 
@@ -55,7 +57,10 @@ class Country(models.Model):
         default=uuid.uuid4,
         editable=False,
     )
-    name = models.CharField(max_length=255, unique=True)
+    name = models.CharField(
+        max_length=255,
+        unique=True
+    )
 
     class Meta:
         verbose_name_plural = "countries"
@@ -75,7 +80,9 @@ class City(models.Model):
         max_length=255,
     )
     country = models.ForeignKey(
-        Country, on_delete=models.PROTECT, related_name="cities"
+        Country,
+        on_delete=models.PROTECT,
+        related_name="cities"
     )
 
     class Meta:
@@ -83,7 +90,8 @@ class City(models.Model):
         ordering = ["name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["name", "country"], name="unique_city_name_country"
+                fields=["name", "country"],
+                name="unique_city_name_country"
             ),
         ]
 
@@ -110,7 +118,9 @@ class Airport(models.Model):
     )
     name = models.CharField(max_length=255, unique=True)
     closest_big_city = models.ForeignKey(
-        City, on_delete=models.PROTECT, related_name="airports"
+        City,
+        on_delete=models.PROTECT,
+        related_name="airports"
     )
     image = models.ImageField(
         null=True,
@@ -124,7 +134,10 @@ class Airport(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} (closest city: " f"{self.closest_big_city.name})"
+        return (
+            f"{self.name} (closest city: "
+            f"{self.closest_big_city.name})"
+        )
 
 
 class AirplaneType(models.Model):
@@ -209,7 +222,8 @@ class Route(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["source", "destination"], name="unique_route_source_destination"
+                fields=["source", "destination"],
+                name="unique_route_source_destination"
             ),
         ]
 
@@ -221,16 +235,13 @@ class Route(models.Model):
             ValidationError
         )
 
-        # if (
-        #     self.source_id
-        #     and self.destination_id
-        #     and self.source_id == self.destination_id
-        # ):
-        #     raise ValidationError(
-        #         {
-        #             "destination": ["Destination must differ from source."],
-        #         }
-        #     )
+    def save(
+            self,
+            *args: Any,
+            **kwargs: Any,
+    ) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return (
@@ -277,16 +288,14 @@ class Flight(models.Model):
             self.arrival_time,
             ValidationError
         )
-        # if (
-        #     self.departure_time
-        #     and self.arrival_time
-        #     and self.arrival_time <= self.departure_time
-        # ):
-        #     raise ValidationError(
-        #         {
-        #             "arrival_time": ["Arrival time must be later than departure time."],
-        #         }
-        #     )
+
+    def save(
+            self,
+            *args: Any,
+            **kwargs: Any,
+    ) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return (
@@ -314,7 +323,10 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"Order created at {self.created_at} by {self.user.email}"
+        return (
+            f"Order created at {self.created_at} "
+            f"by {self.user.email}"
+        )
 
 
 class Ticket(models.Model):
@@ -339,39 +351,33 @@ class Ticket(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["flight", "row", "seat"], name="unique_ticket_flight_row_seat"
+                fields=["flight", "row", "seat"],
+                name="unique_ticket_flight_row_seat"
             )
         ]
 
     def clean(self) -> None:
         super().clean()
 
-        if self.flight_id:
-            airplane_rows = self.flight.airplane.rows
-            airplane_seats_in_row = self.flight.airplane.seats_in_row
+        flight = self.flight if self.flight_id else None
 
-            if airplane_rows < self.row or self.row < 1:
-                raise ValidationError(
-                    {
-                        "row": [
-                            f"Current row ({self.row}) must be between "
-                            f"1 and airplane rows count ({airplane_rows})"
-                        ]
-                    }
-                )
+        validate_ticket_rows_and_seats_in_row(
+            flight,
+            self.row,
+            self.seat,
+            ValidationError,
+        )
 
-            if airplane_seats_in_row < self.seat or self.seat < 1:
-                raise ValidationError(
-                    {
-                        "seat": [
-                            f"Current seat ({self.seat}) must be between "
-                            f"1 and seats in row count ({airplane_seats_in_row})"
-                        ]
-                    }
-                )
+    def save(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return (
-            f"Ticket for flight: |{self.flight}|"
-            f" (row: {self.row}, seat: {self.seat})"
+            f"Ticket for flight: |{self.flight}| "
+            f"(row: {self.row}, seat: {self.seat})"
         )

@@ -10,11 +10,14 @@ from airport.models import (
     Country,
     Crew,
     Flight,
+    Order,
     Route,
+    Ticket,
 )
 from airport.utils.validators import (
     validate_flight_departure_and_arrival_time,
     validate_route_source_destination,
+    validate_ticket_rows_and_seats_in_row,
 )
 
 
@@ -52,7 +55,10 @@ class AirportSerializer(serializers.ModelSerializer):
 
 
 class AirportListSerializer(AirportSerializer):
-    closest_big_city = serializers.SlugRelatedField(read_only=True, slug_field="name")
+    closest_big_city = serializers.SlugRelatedField(
+        read_only=True,
+        slug_field="name"
+    )
 
 
 class AirportDetailSerializer(AirportSerializer):
@@ -280,4 +286,84 @@ class FlightDetailSerializer(FlightSerializer):
             "arrival_time",
             "flight_duration",
             "crew",
+        ]
+
+
+class TicketSerializer(serializers.ModelSerializer):
+    flight = serializers.PrimaryKeyRelatedField(
+        queryset=Flight.objects.select_related(
+            "route__source__closest_big_city__country",
+            "route__destination__closest_big_city__country",
+            "airplane__airplane_type",
+        ),
+    )
+
+    class Meta:
+        model = Ticket
+        fields = [
+            "id",
+            "row",
+            "seat",
+            "flight",
+        ]
+
+    def validate(
+        self,
+        attrs: dict[str, Any],
+    ) -> dict[str, Any]:
+        flight = attrs.get(
+            "flight",
+            getattr(self.instance, "flight", None),
+        )
+        row = attrs.get(
+            "row",
+            getattr(self.instance, "row", None),
+        )
+        seat = attrs.get(
+            "seat",
+            getattr(self.instance, "seat", None),
+        )
+
+        validate_ticket_rows_and_seats_in_row(
+            flight,
+            row,
+            seat,
+            serializers.ValidationError,
+        )
+
+        return attrs
+
+
+class TicketListSerializer(TicketSerializer):
+    flight = FlightListSerializer(read_only=True)
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "created_at"
+        ]
+
+
+class OrderListSerializer(OrderSerializer):
+    tickets_count = serializers.IntegerField(read_only=True)
+
+    class Meta(OrderSerializer.Meta):
+        fields = [
+            "id",
+            "tickets_count",
+            "created_at"
+        ]
+
+
+class OrderDetailSerializer(OrderSerializer):
+    tickets = TicketListSerializer(many=True, read_only=True)
+
+    class Meta(OrderSerializer.Meta):
+        fields = [
+            "id",
+            "tickets",
+            "created_at"
         ]
