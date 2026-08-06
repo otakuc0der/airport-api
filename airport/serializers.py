@@ -53,7 +53,7 @@ class AirportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Airport
-        fields = ["id", "name", "closest_big_city", "image"]
+        fields = ["id", "name", "closest_big_city"]
 
 
 class AirportListSerializer(AirportSerializer):
@@ -62,9 +62,21 @@ class AirportListSerializer(AirportSerializer):
         slug_field="name"
     )
 
+    class Meta(AirportSerializer.Meta):
+        fields = AirportSerializer.Meta.fields + ["image"]
+
 
 class AirportDetailSerializer(AirportSerializer):
     closest_big_city = CityDetailSerializer(read_only=True)
+
+    class Meta(AirportSerializer.Meta):
+        fields = AirportSerializer.Meta.fields + ["image"]
+
+
+class AirportUploadImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Airport
+        fields = ["id", "image"]
 
 
 class AirplaneTypeSerializer(serializers.ModelSerializer):
@@ -84,7 +96,6 @@ class AirplaneSerializer(serializers.ModelSerializer):
             "rows",
             "seats_in_row",
             "airplane_type",
-            "image",
             "capacity",
         ]
 
@@ -95,9 +106,21 @@ class AirplaneListSerializer(AirplaneSerializer):
         slug_field="name",
     )
 
+    class Meta(AirplaneSerializer.Meta):
+        fields = AirplaneSerializer.Meta.fields + ["image"]
+
 
 class AirplaneDetailSerializer(AirplaneSerializer):
     airplane_type = AirplaneTypeSerializer(read_only=True)
+
+    class Meta(AirplaneSerializer.Meta):
+        fields = AirplaneSerializer.Meta.fields + ["image"]
+
+
+class AirplaneUploadImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Airplane
+        fields = ["id", "image"]
 
 
 class CrewSerializer(serializers.ModelSerializer):
@@ -107,18 +130,30 @@ class CrewSerializer(serializers.ModelSerializer):
             "id",
             "first_name",
             "last_name",
-            "photo",
         ]
 
 
-class CrewListSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Crew
+class CrewListSerializer(CrewSerializer):
+    class Meta(CrewSerializer.Meta):
         fields = [
             "id",
             "full_name",
             "photo",
         ]
+
+
+class CrewUploadPhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Crew
+        fields = [
+            "id",
+            "photo"
+        ]
+
+
+class CrewDetailSerializer(CrewSerializer):
+    class Meta(CrewSerializer.Meta):
+        fields = CrewSerializer.Meta.fields + ["photo"]
 
 
 class RouteSerializer(serializers.ModelSerializer):
@@ -258,6 +293,7 @@ class FlightListSerializer(FlightSerializer):
         many=True, read_only=True, slug_field="full_name"
     )
     flight_duration = serializers.DurationField(read_only=True)
+    available_seats = serializers.IntegerField(read_only=True)
 
     class Meta(FlightSerializer.Meta):
         fields = [
@@ -270,6 +306,7 @@ class FlightListSerializer(FlightSerializer):
             "departure_time",
             "arrival_time",
             "flight_duration",
+            "available_seats",
         ]
 
 

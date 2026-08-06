@@ -1,6 +1,12 @@
 from django.db.models import Count, F, QuerySet
-from rest_framework import mixins, viewsets
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import mixins, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import (
+    IsAdminUser,
+    IsAuthenticated
+)
+from rest_framework.request import Request
+from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 
 from airport.models import (
@@ -19,9 +25,11 @@ from airport.serializers import (
     AirplaneListSerializer,
     AirplaneSerializer,
     AirplaneTypeSerializer,
+    AirplaneUploadImageSerializer,
     AirportDetailSerializer,
     AirportListSerializer,
     AirportSerializer,
+    AirportUploadImageSerializer,
     CityDetailSerializer,
     CityListSerializer,
     CitySerializer,
@@ -29,6 +37,7 @@ from airport.serializers import (
     CrewDetailSerializer,
     CrewListSerializer,
     CrewSerializer,
+    CrewUploadPhotoSerializer,
     FlightDetailSerializer,
     FlightListSerializer,
     FlightSerializer,
@@ -67,7 +76,33 @@ class AirportViewSet(viewsets.ModelViewSet):
             return AirportListSerializer
         if self.action == "retrieve":
             return AirportDetailSerializer
+        if self.action == "upload_airport_image":
+            return AirportUploadImageSerializer
         return AirportSerializer
+
+    @action(
+        methods=["post"],
+        detail=True,
+        permission_classes=[IsAdminUser],
+        url_path="upload-image",
+    )
+    def upload_airport_image(
+        self,
+        request: Request,
+        pk: str | None = None,
+    ) -> Response:
+        airport = self.get_object()
+        serializer = self.get_serializer(
+            airport,
+            data=request.data,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class AirplaneTypeViewSet(viewsets.ModelViewSet):
@@ -83,7 +118,33 @@ class AirplaneViewSet(viewsets.ModelViewSet):
             return AirplaneListSerializer
         if self.action == "retrieve":
             return AirplaneDetailSerializer
+        if self.action == "upload_airplane_image":
+            return AirplaneUploadImageSerializer
         return AirplaneSerializer
+
+    @action(
+        methods=["post"],
+        detail=True,
+        permission_classes=[IsAdminUser],
+        url_path="upload-image",
+    )
+    def upload_airplane_image(
+        self,
+        request: Request,
+        pk: str | None = None,
+    ) -> Response:
+        airplane = self.get_object()
+        serializer = self.get_serializer(
+            airplane,
+            data=request.data,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class CrewViewSet(viewsets.ModelViewSet):
@@ -94,7 +155,33 @@ class CrewViewSet(viewsets.ModelViewSet):
             return CrewListSerializer
         if self.action == "retrieve":
             return CrewDetailSerializer
+        if self.action == "upload_photo":
+            return CrewUploadPhotoSerializer
         return CrewSerializer
+
+    @action(
+        methods=["post"],
+        detail=True,
+        permission_classes=[IsAdminUser],
+        url_path="upload-photo",
+    )
+    def upload_photo(
+        self,
+        request: Request,
+        pk: str | None = None,
+    ) -> Response:
+        crew_member = self.get_object()
+        serializer = self.get_serializer(
+            crew_member,
+            data=request.data,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class RouteViewSet(viewsets.ModelViewSet):
