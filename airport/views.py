@@ -1,5 +1,6 @@
-from django.db.models import Count, F
-from rest_framework import viewsets
+from django.db.models import Count, F, QuerySet
+from rest_framework import mixins, viewsets
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.serializers import BaseSerializer
 
 from airport.models import (
@@ -10,6 +11,7 @@ from airport.models import (
     Country,
     Crew,
     Flight,
+    Order,
     Route,
 )
 from airport.serializers import (
@@ -30,6 +32,9 @@ from airport.serializers import (
     FlightDetailSerializer,
     FlightListSerializer,
     FlightSerializer,
+    OrderDetailSerializer,
+    OrderListSerializer,
+    OrderSerializer,
     RouteDetailSerializer,
     RouteListSerializer,
     RouteSerializer,
@@ -130,3 +135,47 @@ class FlightViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return FlightDetailSerializer
         return FlightSerializer
+
+
+class OrderViewSet(
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.ListModelMixin,
+    viewsets.GenericViewSet,
+):
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self) -> QuerySet[Order]:
+        queryset = (
+            Order.objects
+            .select_related("user")
+            .prefetch_related(
+                "tickets__flight__route__source__closest_big_city__country",
+                "tickets__flight__route__destination__closest_big_city__country",
+                "tickets__flight__airplane__airplane_type",
+                "tickets__flight__crew",
+            )
+            .annotate(
+                tickets_count=Count("tickets"),
+            )
+        )
+
+        if self.request.user.is_staff:
+            return queryset
+
+        return queryset.filter(user=self.request.user)
+
+    def get_serializer_class(self) -> type[BaseSerializer]:
+        if self.action == "list":
+            return OrderListSerializer
+
+        if self.action == "retrieve":
+            return OrderDetailSerializer
+
+        return OrderSerializer
+
+    def perform_create(
+        self,
+        serializer: BaseSerializer,
+    ) -> None:
+        serializer.save(user=self.request.user)
