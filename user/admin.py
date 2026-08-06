@@ -1,45 +1,19 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.utils.translation import gettext as _
 
 from user.models import User
 
 
 @admin.register(User)
-class UserAdmin(UserAdmin):
-    ordering = ("email",)
-    list_display = (
-        "email",
-        "first_name",
-        "last_name",
-        "is_staff",
-        "is_active",
-    )
-    search_fields = (
-        "email",
-        "first_name",
-        "last_name",
-    )
+class UserAdmin(DjangoUserAdmin):
+    """Define admin configuration for the custom User model without username."""
+
     fieldsets = (
+        (None, {"fields": ("email", "password")}),
+        (_("Personal info"), {"fields": ("first_name", "last_name")}),
         (
-            None,
-            {
-                "fields": (
-                    "email",
-                    "password",
-                ),
-            },
-        ),
-        (
-            "Personal info",
-            {
-                "fields": (
-                    "first_name",
-                    "last_name",
-                ),
-            },
-        ),
-        (
-            "Permissions",
+            _("Permissions"),
             {
                 "fields": (
                     "is_active",
@@ -47,32 +21,20 @@ class UserAdmin(UserAdmin):
                     "is_superuser",
                     "groups",
                     "user_permissions",
-                ),
+                )
             },
         ),
-        (
-            "Important dates",
-            {
-                "fields": (
-                    "last_login",
-                    "date_joined",
-                ),
-            },
-        ),
+        (_("Important dates"), {"fields": ("last_login", "date_joined")}),
     )
-
     add_fieldsets = (
         (
             None,
             {
                 "classes": ("wide",),
-                "fields": (
-                    "email",
-                    "password1",
-                    "password2",
-                    "is_staff",
-                    "is_active",
-                ),
+                "fields": ("email", "password1", "password2"),
             },
         ),
     )
+    list_display = ("email", "first_name", "last_name", "is_staff")
+    search_fields = ("email", "first_name", "last_name")
+    ordering = ("email",)

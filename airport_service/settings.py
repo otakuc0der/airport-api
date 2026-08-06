@@ -98,13 +98,47 @@ STATIC_ROOT = "/files/static"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = "/files/media"
 
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend"
     ],
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
     "DEFAULT_PERMISSION_CLASSES": [
         "airport.permissions.IsAdminOrReadOnly",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 10,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Airport API",
+    "DESCRIPTION": (
+        "REST API for an airport management and flight booking system. "
+        "Users can browse countries, cities, airports, airplane types, "
+        "airplanes, routes, crew members and available flights. "
+        "Authenticated users can create orders containing one or more tickets "
+        "and view only their own orders. Tickets cannot be created separately "
+        "from an order. "
+        "Users with administrator permissions can manage airport-related data "
+        "where the corresponding endpoint is available. "
+        "Authentication is performed using JWT access tokens."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "defaultModelRendering": "model",
+        "defaultModelsExpandDepth": 2,
+        "defaultModelExpandDepth": 2,
+    },
 }
