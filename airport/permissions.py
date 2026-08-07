@@ -3,14 +3,13 @@ from rest_framework.permissions import (
     BasePermission,
 )
 from rest_framework.request import Request
-from rest_framework.views import APIView
 
 
 class IsAdminOrReadOnly(BasePermission):
     def has_permission(
         self,
         request: Request,
-        view: APIView,
+        view,
     ) -> bool:
         if request.method in SAFE_METHODS:
             return True
