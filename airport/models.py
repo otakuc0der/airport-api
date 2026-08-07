@@ -5,12 +5,13 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from airport.utils.files import generate_image_file_path
 from airport.utils.validators import (
-    validate_route_source_destination,
     validate_flight_departure_and_arrival_time,
-    validate_ticket_rows_and_seats_in_row
+    validate_route_source_destination,
+    validate_ticket_rows_and_seats_in_row,
 )
 
 
@@ -236,9 +237,9 @@ class Route(models.Model):
         )
 
     def save(
-            self,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         self.full_clean()
         super().save(*args, **kwargs)
@@ -290,19 +291,27 @@ class Flight(models.Model):
         )
 
     def save(
-            self,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         self.full_clean()
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
+        departure_time = timezone.localtime(
+            self.departure_time
+        ).strftime("%Y-%m-%d %H:%M")
+
+        arrival_time = timezone.localtime(
+            self.arrival_time
+        ).strftime("%Y-%m-%d %H:%M")
+
         return (
             f"Flight '{self.route.source.closest_big_city}-"
             f"{self.route.destination.closest_big_city}' "
-            f"(departure time: {self.departure_time}; "
-            f"arrival time: {self.arrival_time})"
+            f"(departure time: {departure_time}; "
+            f"arrival time: {arrival_time})"
         )
 
 

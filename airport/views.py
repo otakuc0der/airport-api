@@ -3,12 +3,20 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import (
     IsAdminUser,
-    IsAuthenticated
+    IsAuthenticated,
 )
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 
+from airport.filters import (
+    AirplaneFilter,
+    AirportFilter,
+    CityFilter,
+    CrewFilter,
+    FlightFilter,
+    RouteFilter,
+)
 from airport.models import (
     Airplane,
     AirplaneType,
@@ -57,6 +65,7 @@ class CountryViewSet(viewsets.ModelViewSet):
 
 class CityViewSet(viewsets.ModelViewSet):
     queryset = City.objects.select_related("country")
+    filterset_class = CityFilter
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
@@ -70,6 +79,7 @@ class AirportViewSet(viewsets.ModelViewSet):
     queryset = Airport.objects.select_related(
         "closest_big_city__country"
     )
+    filterset_class = AirportFilter
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
@@ -112,6 +122,7 @@ class AirplaneTypeViewSet(viewsets.ModelViewSet):
 
 class AirplaneViewSet(viewsets.ModelViewSet):
     queryset = Airplane.objects.select_related("airplane_type")
+    filterset_class = AirplaneFilter
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
@@ -149,6 +160,7 @@ class AirplaneViewSet(viewsets.ModelViewSet):
 
 class CrewViewSet(viewsets.ModelViewSet):
     queryset = Crew.objects.all()
+    filterset_class = CrewFilter
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
@@ -189,6 +201,7 @@ class RouteViewSet(viewsets.ModelViewSet):
         "source__closest_big_city__country",
         "destination__closest_big_city__country"
     )
+    filterset_class = RouteFilter
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
@@ -211,10 +224,11 @@ class FlightViewSet(viewsets.ModelViewSet):
         .annotate(
             available_seats=(
                 F("airplane__rows") * F("airplane__seats_in_row")
-                - Count("tickets")
+                - Count("tickets", distinct=True)
             )
         )
     )
+    filterset_class = FlightFilter
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
