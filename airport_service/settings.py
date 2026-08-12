@@ -99,8 +99,8 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = "/files/media"
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": True
 }
 
@@ -114,9 +114,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "airport.permissions.IsAdminOrReadOnly",
     ],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle"
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "10/min",
+        "user": "30/min"
+    },
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "EXCEPTION_HANDLER": (
+        "airport_service.exceptions.custom_exception_handler"
+    ),
 }
 
 SPECTACULAR_SETTINGS = {
@@ -125,16 +136,14 @@ SPECTACULAR_SETTINGS = {
         "REST API for an airport management and flight booking system. "
         "Users can browse countries, cities, airports, airplane types, "
         "airplanes, routes, crew members and available flights. "
-        "Authenticated users can create orders containing one or more tickets "
-        "and view only their own orders. Tickets cannot be created separately "
-        "from an order. "
-        "Users with administrator permissions can manage airport-related data "
-        "where the corresponding endpoint is available. "
-        "Authentication is performed using JWT access tokens."
+        "Authenticated users can create orders containing one or more "
+        "tickets and view only their own orders. Tickets cannot be "
+        "created separately from an order. "
+        "Users with administrator permissions can manage airport-related "
+        "data. Authentication is performed using JWT access tokens."
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-
     "SWAGGER_UI_SETTINGS": {
         "deepLinking": True,
         "defaultModelRendering": "model",
