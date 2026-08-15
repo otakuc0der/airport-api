@@ -343,3 +343,22 @@ class FlightFilter(filters.FilterSet):
     class Meta:
         model = Flight
         fields = []
+
+
+class PopularRouteFilter(filters.FilterSet):
+    limit = filters.NumberFilter(
+        method="limit_popular_routes",
+        label="Limit top popular routes",
+        min_value=1,
+    )
+
+    def limit_popular_routes(
+        self,
+        queryset: QuerySet,
+        name: str,
+        value: int | None,
+    ) -> QuerySet:
+        if value is not None:
+            return queryset[:value]
+
+        return queryset
