@@ -1,11 +1,14 @@
-from django.db.models import Count, F, QuerySet
-
-from rest_framework import mixins, status, viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
-from rest_framework.request import Request
-from rest_framework.response import Response
-from rest_framework.serializers import BaseSerializer
+from django.db import transaction
+from django.db.models import (
+    Count,
+    F,
+    Prefetch,
+    Q,
+    QuerySet,
+    Value,
+)
+from django.db.models.functions import Concat
+from django.utils import timezone
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
@@ -14,12 +17,25 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
+from rest_framework import mixins, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import (
+    AllowAny,
+    IsAdminUser,
+    IsAuthenticated,
+)
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.serializers import BaseSerializer
+
 from airport.filters import (
     AirplaneFilter,
     AirportFilter,
     CityFilter,
     CrewFilter,
     FlightFilter,
+    PopularRouteFilter,
     RouteFilter,
 )
 from airport.models import (
@@ -32,6 +48,7 @@ from airport.models import (
     Flight,
     Order,
     Route,
+    Ticket,
 )
 from airport.schema.responses import (
     BAD_REQUEST_RESPONSE,
@@ -51,6 +68,7 @@ from airport.serializers import (
     AirportDetailSerializer,
     AirportListSerializer,
     AirportSerializer,
+    AirportStatisticsSerializer,
     AirportUploadImageSerializer,
     CityDetailSerializer,
     CityListSerializer,
@@ -60,15 +78,22 @@ from airport.serializers import (
     CrewListSerializer,
     CrewSerializer,
     CrewUploadPhotoSerializer,
+    FlightCancelSerializer,
     FlightDetailSerializer,
     FlightListSerializer,
     FlightSerializer,
+    OrderCancelSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
     OrderSerializer,
     RouteDetailSerializer,
     RouteListSerializer,
+    RoutePopularSerializer,
     RouteSerializer,
+)
+from airport.utils.validators import (
+    validate_flight_cancellation,
+    validate_order_cancellation,
 )
 
 
@@ -357,7 +382,8 @@ class CityViewSet(viewsets.ModelViewSet):
         summary="Retrieve airport",
         description=(
             "Return detailed information about an airport identified "
-            "by its ID, including its closest big city and country."
+            "by its ID, including its closest big city, country, "
+            "and uploaded image."
         ),
         responses={
             200: AirportDetailSerializer,
@@ -451,12 +477,87 @@ class CityViewSet(viewsets.ModelViewSet):
         },
         tags=["Airports"],
     ),
+    airport_statistics=extend_schema(
+        summary="Retrieve airport statistics",
+        description=(
+            "Return operational statistics for an airport identified by "
+            "its ID. The response includes the number of departing and "
+            "arriving routes, upcoming departures and arrivals, and ticket "
+            "statistics for flights departing from the airport. Cancelled "
+            "flights are excluded from upcoming flight counts."
+        ),
+        responses={
+            200: AirportStatisticsSerializer,
+            404: NOT_FOUND_RESPONSE,
+            429: TOO_MANY_REQUESTS_RESPONSE,
+        },
+        tags=["Airports"],
+    ),
 )
 class AirportViewSet(viewsets.ModelViewSet):
-    queryset = Airport.objects.select_related(
-        "closest_big_city__country"
-    )
     filterset_class = AirportFilter
+
+    def get_queryset(self) -> QuerySet[Airport]:
+        queryset = Airport.objects.select_related(
+            "closest_big_city__country"
+        )
+
+        if self.action == "airport_statistics":
+            now = timezone.now()
+
+            queryset = queryset.annotate(
+                departing_routes_count=Count(
+                    "source_routes",
+                    distinct=True,
+                ),
+                arriving_routes_count=Count(
+                    "destination_routes",
+                    distinct=True,
+                ),
+                upcoming_departures_count=Count(
+                    "source_routes__flights",
+                    filter=~Q(
+                        source_routes__flights__status=Flight.Status.CANCELLED,
+                    ) & Q(
+                        source_routes__flights__departure_time__gt=now,
+                    ),
+                    distinct=True,
+                ),
+                upcoming_arrivals_count=Count(
+                    "destination_routes__flights",
+                    filter=~Q(
+                        destination_routes__flights__status=Flight.Status.CANCELLED,
+                    ) & Q(
+                        destination_routes__flights__arrival_time__gt=now,
+                    ),
+                    distinct=True,
+                ),
+                active_tickets_count=Count(
+                    "source_routes__flights__tickets",
+                    filter=Q(
+                        source_routes__flights__tickets__status=Ticket.Status.ACTIVE
+                    ),
+                    distinct=True,
+                ),
+                cancelled_tickets_count=Count(
+                    "source_routes__flights__tickets",
+                    filter=Q(
+                        source_routes__flights__tickets__status=Ticket.Status.CANCELLED
+                    ),
+                    distinct=True,
+                )
+            ).annotate(
+                total_upcoming_flights=(
+                    F("upcoming_departures_count")
+                    + F("upcoming_arrivals_count")
+                ),
+                total_tickets_count=(
+                    F("active_tickets_count")
+                    + F("cancelled_tickets_count")
+                )
+            )
+
+        return queryset
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
@@ -465,6 +566,8 @@ class AirportViewSet(viewsets.ModelViewSet):
             return AirportDetailSerializer
         if self.action == "upload_airport_image":
             return AirportUploadImageSerializer
+        if self.action == "airport_statistics":
+            return AirportStatisticsSerializer
         return AirportSerializer
 
     @action(
@@ -486,6 +589,25 @@ class AirportViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        permission_classes=[AllowAny],
+        url_path="statistics",
+        url_name="statistics"
+    )
+    def airport_statistics(
+        self,
+        request: Request,
+        pk: str | None = None,
+    ) -> Response:
+        airport = self.get_object()
+        serializer = self.get_serializer(airport)
         return Response(
             serializer.data,
             status=status.HTTP_200_OK,
@@ -1021,6 +1143,8 @@ class CrewViewSet(viewsets.ModelViewSet):
         summary="Create route",
         description=(
             "Create a new route between two different airports. "
+            "The same source and destination combination cannot be "
+            "created more than once. "
             "This operation is available only to administrators."
         ),
         responses={
@@ -1036,7 +1160,8 @@ class CrewViewSet(viewsets.ModelViewSet):
         summary="Update route",
         description=(
             "Replace the data of an existing route. "
-            "The source and destination airports must be different. "
+            "The source and destination airports must be different and "
+            "the resulting route must remain unique. "
             "This operation is available only to administrators."
         ),
         responses={
@@ -1053,7 +1178,8 @@ class CrewViewSet(viewsets.ModelViewSet):
         summary="Partially update route",
         description=(
             "Update one or more fields of an existing route. "
-            "The source and destination airports must remain different. "
+            "The source and destination airports must remain different "
+            "and the resulting route must remain unique. "
             "This operation is available only to administrators."
         ),
         responses={
@@ -1083,20 +1209,114 @@ class CrewViewSet(viewsets.ModelViewSet):
         },
         tags=["Routes"],
     ),
+    popular_routes=extend_schema(
+        summary="List popular routes",
+        description=(
+            "Return routes ordered by popularity. Popularity is based "
+            "primarily on the number of active tickets and secondarily "
+            "on the number of non-cancelled flights. Cancelled tickets "
+            "and cancelled flights are excluded from the statistics."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="limit",
+                description=(
+                    "Limit the response to the specified number of "
+                    "most popular routes."
+                ),
+                required=False,
+                type=OpenApiTypes.INT,
+            ),
+        ],
+        responses={
+            200: RoutePopularSerializer(many=True),
+            400: BAD_REQUEST_RESPONSE,
+            429: TOO_MANY_REQUESTS_RESPONSE,
+        },
+        tags=["Routes"],
+    ),
 )
 class RouteViewSet(viewsets.ModelViewSet):
-    queryset = Route.objects.select_related(
-        "source__closest_big_city__country",
-        "destination__closest_big_city__country"
-    )
     filterset_class = RouteFilter
+
+    def filter_queryset(
+        self,
+        queryset: QuerySet[Route],
+    ) -> QuerySet[Route]:
+        if self.action == "popular_routes":
+            self.filterset_class = PopularRouteFilter
+
+        return super().filter_queryset(queryset)
+
+    def get_queryset(self) -> QuerySet[Route]:
+        queryset = Route.objects.select_related(
+            "source__closest_big_city__country",
+            "destination__closest_big_city__country"
+        )
+
+        if self.action == "popular_routes":
+            queryset = queryset.annotate(
+                route_name=Concat(
+                    F("source__closest_big_city__name"),
+                    Value(" → "),
+                    F("destination__closest_big_city__name")
+                ),
+                route_airports_names=Concat(
+                    F("source__name"),
+                    Value(" → "),
+                    F("destination__name")
+                ),
+                flights_count=Count(
+                    "flights",
+                    filter=~Q(flights__status=Flight.Status.CANCELLED),
+                    distinct=True,
+                ),
+                tickets_count=Count(
+                    "flights__tickets",
+                    filter=(
+                        Q(flights__tickets__status=Ticket.Status.ACTIVE)
+                        & ~Q(flights__status=Flight.Status.CANCELLED)
+                    ),
+                    distinct=True,
+                ),
+            ).order_by(
+                "-tickets_count",
+                "-flights_count"
+            )
+
+        return queryset
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
             return RouteListSerializer
         if self.action == "retrieve":
             return RouteDetailSerializer
+        if self.action == "popular_routes":
+            return RoutePopularSerializer
         return RouteSerializer
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_name="popular",
+        url_path="popular",
+        permission_classes=[AllowAny],
+    )
+    def popular_routes(
+        self,
+        request: Request,
+    ) -> Response:
+        queryset = self.filter_queryset(self.get_queryset())
+
+        serializer = self.get_serializer(
+            queryset,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 @extend_schema_view(
@@ -1104,8 +1324,9 @@ class RouteViewSet(viewsets.ModelViewSet):
         summary="List flights",
         description=(
             "Return a paginated list of flights. "
-            "The results can be filtered by route, departure and arrival "
-            "times, airplane, crew members, and seat availability."
+            "The results can be filtered by source and destination "
+            "airports, source and destination cities, departure and "
+            "arrival times, airplane, crew members, and seat availability."
         ),
         parameters=[
             OpenApiParameter(
@@ -1252,11 +1473,15 @@ class RouteViewSet(viewsets.ModelViewSet):
         },
         tags=["Flights"],
     ),
+
     retrieve=extend_schema(
         summary="Retrieve flight",
         description=(
             "Return detailed information about a flight identified by "
-            "its ID, including route, airplane, crew, and flight duration."
+            "its ID, including route information, airplane details, "
+            "assigned crew members, flight duration, and currently "
+            "occupied seats. Only active tickets are included in the "
+            "occupied seat information."
         ),
         responses={
             200: FlightDetailSerializer,
@@ -1265,13 +1490,22 @@ class RouteViewSet(viewsets.ModelViewSet):
         },
         tags=["Flights"],
     ),
+
     create=extend_schema(
         summary="Create flight",
         description=(
             "Create a new flight with a route, airplane, departure and "
-            "arrival times, and assigned crew members. "
-            "This operation is available only to administrators."
+            "arrival times, and assigned crew members. The arrival time "
+            "must be later than the departure time and at least one crew "
+            "member must be assigned. The selected airplane and all crew "
+            "members must be available for the entire flight interval. "
+            "Schedule validation also requires a 30-minute buffer before "
+            "and after flights to prevent overlapping assignments. "
+            "A flight cannot be created directly with cancelled status; "
+            "the dedicated cancellation endpoint must be used to cancel "
+            "a flight. This operation is available only to administrators."
         ),
+        request=FlightSerializer,
         responses={
             201: FlightSerializer,
             400: BAD_REQUEST_RESPONSE,
@@ -1281,13 +1515,22 @@ class RouteViewSet(viewsets.ModelViewSet):
         },
         tags=["Flights"],
     ),
+
     update=extend_schema(
         summary="Update flight",
         description=(
-            "Replace the data of an existing flight. "
-            "The arrival time must be later than the departure time. "
+            "Replace the data of an existing flight. A cancelled flight "
+            "cannot be modified. The arrival time must remain later than "
+            "the departure time and at least one crew member must remain "
+            "assigned. The selected airplane and crew members must not "
+            "conflict with other flights and must respect the required "
+            "30-minute buffer between flights. The airplane cannot be "
+            "changed if active tickets already exist for the flight. "
+            "The flight cannot be cancelled by changing its status "
+            "directly; use the dedicated cancellation endpoint instead. "
             "This operation is available only to administrators."
         ),
+        request=FlightSerializer,
         responses={
             200: FlightSerializer,
             400: BAD_REQUEST_RESPONSE,
@@ -1298,13 +1541,23 @@ class RouteViewSet(viewsets.ModelViewSet):
         },
         tags=["Flights"],
     ),
+
     partial_update=extend_schema(
         summary="Partially update flight",
         description=(
-            "Update one or more fields of an existing flight. "
-            "The arrival time must remain later than the departure time. "
-            "This operation is available only to administrators."
+            "Update one or more fields of an existing flight. Fields "
+            "omitted from the request keep their current values. A "
+            "cancelled flight cannot be modified. The resulting flight "
+            "must have valid departure and arrival times, at least one "
+            "crew member, and no airplane or crew schedule conflicts. "
+            "The required 30-minute buffer between flights must remain "
+            "satisfied. The airplane cannot be changed if active tickets "
+            "already exist for the flight. The flight cannot be cancelled "
+            "by changing its status directly; use the dedicated "
+            "cancellation endpoint instead. This operation is available "
+            "only to administrators."
         ),
+        request=FlightSerializer,
         responses={
             200: FlightSerializer,
             400: BAD_REQUEST_RESPONSE,
@@ -1315,12 +1568,14 @@ class RouteViewSet(viewsets.ModelViewSet):
         },
         tags=["Flights"],
     ),
+
     destroy=extend_schema(
         summary="Delete flight",
         description=(
             "Delete a flight identified by its ID. "
             "A flight cannot be deleted while it is referenced by "
-            "protected related objects."
+            "protected related objects. This operation is available "
+            "only to administrators."
         ),
         responses={
             204: NO_CONTENT_RESPONSE,
@@ -1332,33 +1587,123 @@ class RouteViewSet(viewsets.ModelViewSet):
         },
         tags=["Flights"],
     ),
+
+    cancel_flight=extend_schema(
+        summary="Cancel flight",
+        description=(
+            "Cancel an existing flight. A flight that has already been "
+            "cancelled or has already departed cannot be cancelled. "
+            "The flight status is changed to cancelled and all active "
+            "tickets associated with the flight are also cancelled. "
+            "Confirmed orders containing tickets for the cancelled flight "
+            "are changed to cancelled status. This operation is available "
+            "only to administrators."
+        ),
+        request=None,
+        responses={
+            200: FlightCancelSerializer,
+            400: BAD_REQUEST_RESPONSE,
+            401: UNAUTHORIZED_RESPONSE,
+            403: FORBIDDEN_RESPONSE,
+            404: NOT_FOUND_RESPONSE,
+            429: TOO_MANY_REQUESTS_RESPONSE,
+        },
+        tags=["Flights"],
+    ),
 )
 class FlightViewSet(viewsets.ModelViewSet):
-    queryset = (
-        Flight
-        .objects
-        .select_related(
-            "route__source__closest_big_city__country",
-            "route__destination__closest_big_city__country",
-            "airplane__airplane_type"
-        )
-        .prefetch_related("crew")
-        .annotate(
-            available_seats=(
-                F("airplane__rows") * F("airplane__seats_in_row")
-                - Count("tickets", distinct=True)
-            )
-        )
-        .order_by("-departure_time")
-    )
     filterset_class = FlightFilter
+
+    def get_queryset(self) -> QuerySet[Flight]:
+        queryset = (
+            Flight.objects
+            .select_related(
+                "route__source__closest_big_city__country",
+                "route__destination__closest_big_city__country",
+                "airplane__airplane_type",
+            )
+            .prefetch_related("crew")
+            .annotate(
+                available_seats=(
+                    F("airplane__rows") * F("airplane__seats_in_row")
+                    - Count(
+                    "tickets",
+                    filter=Q(tickets__status=Ticket.Status.ACTIVE),
+                    distinct=True
+                )
+                ),
+            )
+            .order_by("-departure_time", "id")
+        )
+
+        if self.action == "retrieve":
+            queryset = (
+                queryset.prefetch_related(
+                    Prefetch(
+                        "tickets",
+                        queryset=Ticket.objects.filter(
+                            status=Ticket.Status.ACTIVE
+                        ),
+                        to_attr="active_tickets",
+                    )
+                )
+            )
+
+        return queryset
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
             return FlightListSerializer
         if self.action == "retrieve":
             return FlightDetailSerializer
+        if self.action == "cancel_flight":
+            return FlightCancelSerializer
         return FlightSerializer
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[IsAdminUser],
+        url_name="cancel",
+        url_path="cancel"
+    )
+    def cancel_flight(
+        self,
+        request: Request,
+        pk: str | None = None,
+    ) -> Response:
+        flight = self.get_object()
+
+        validate_flight_cancellation(
+            flight,
+            ValidationError
+        )
+
+        with transaction.atomic():
+            flight.status = Flight.Status.CANCELLED
+            flight.save(update_fields=["status"])
+
+            Ticket.objects.filter(
+                flight=flight,
+                status=Ticket.Status.ACTIVE,
+            ).update(
+                status=Ticket.Status.CANCELLED,
+            )
+
+            Order.objects.filter(
+                tickets__flight=flight,
+                status=Order.Status.CONFIRMED,
+            ).update(
+                status=Order.Status.CANCELLED,
+            )
+
+
+        serializer = self.get_serializer(flight)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 @extend_schema_view(
@@ -1366,8 +1711,9 @@ class FlightViewSet(viewsets.ModelViewSet):
         summary="List orders",
         description=(
             "Return a paginated list of orders available to the current "
-            "user. Regular users can view only their own orders, while "
-            "staff users can view all orders."
+            "authenticated user. Regular users can view only their own "
+            "orders, while staff users can view all orders. Each list "
+            "item includes the number of tickets in the order."
         ),
         responses={
             200: OrderListSerializer(many=True),
@@ -1376,11 +1722,12 @@ class FlightViewSet(viewsets.ModelViewSet):
         },
         tags=["Orders"],
     ),
+
     retrieve=extend_schema(
         summary="Retrieve order",
         description=(
             "Return detailed information about an order identified by "
-            "its ID, including the purchased tickets and related flight "
+            "its ID, including its status, tickets, and related flight "
             "information. Regular users can retrieve only their own "
             "orders, while staff users can retrieve any order."
         ),
@@ -1392,18 +1739,50 @@ class FlightViewSet(viewsets.ModelViewSet):
         },
         tags=["Orders"],
     ),
+
     create=extend_schema(
         summary="Create order",
         description=(
-            "Create a new order for the authenticated user with one or "
-            "more tickets. The user is assigned to the order "
-            "automatically and cannot be provided in the request."
+            "Create a new order for the authenticated user. The user is "
+            "assigned automatically and cannot be provided in the request. "
+            "The order must contain at least one ticket and cannot exceed "
+            "the configured maximum number of tickets. All tickets in the "
+            "same order must belong to the same flight. Requested row and "
+            "seat numbers must exist on the airplane assigned to the flight. "
+            "The same seat cannot be duplicated within the request and an "
+            "already active booked seat cannot be purchased again. Tickets "
+            "cannot be purchased for a cancelled flight or after the flight "
+            "has departed. The order and all nested tickets are created "
+            "atomically."
         ),
         request=OrderSerializer,
         responses={
             201: OrderSerializer,
             400: BAD_REQUEST_RESPONSE,
             401: UNAUTHORIZED_RESPONSE,
+            429: TOO_MANY_REQUESTS_RESPONSE,
+        },
+        tags=["Orders"],
+    ),
+
+    cancel_order=extend_schema(
+        summary="Cancel order",
+        description=(
+            "Cancel an order available to the authenticated user. "
+            "An order that is already cancelled cannot be cancelled again. "
+            "The order cannot be cancelled if it contains an active ticket "
+            "for a non-cancelled flight that has already departed. "
+            "When cancellation succeeds, all tickets belonging to the order "
+            "are changed to cancelled status and the order itself is changed "
+            "to cancelled status. Regular users can cancel only their own "
+            "orders, while staff users can cancel any order."
+        ),
+        request=None,
+        responses={
+            200: OrderCancelSerializer,
+            400: BAD_REQUEST_RESPONSE,
+            401: UNAUTHORIZED_RESPONSE,
+            404: NOT_FOUND_RESPONSE,
             429: TOO_MANY_REQUESTS_RESPONSE,
         },
         tags=["Orders"],
@@ -1431,7 +1810,9 @@ class OrderViewSet(
                 "tickets__flight__crew",
             )
             .annotate(
-                tickets_count=Count("tickets"),
+                tickets_count=Count(
+                    "tickets"
+                ),
             )
         )
 
@@ -1447,6 +1828,9 @@ class OrderViewSet(
         if self.action == "retrieve":
             return OrderDetailSerializer
 
+        if self.action == "cancel_order":
+            return OrderCancelSerializer
+
         return OrderSerializer
 
     def perform_create(
@@ -1454,3 +1838,37 @@ class OrderViewSet(
         serializer: BaseSerializer,
     ) -> None:
         serializer.save(user=self.request.user)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[IsAuthenticated],
+        url_path="cancel",
+        url_name="cancel",
+    )
+    def cancel_order(
+        self,
+        request: Request,
+        pk: str | None = None,
+    ) -> Response:
+        order = self.get_object()
+
+        validate_order_cancellation(
+            order,
+            ValidationError,
+        )
+
+        with transaction.atomic():
+            order.tickets.all().update(
+                status=Ticket.Status.CANCELLED
+            )
+
+            order.status = Order.Status.CANCELLED
+            order.save(update_fields=["status"])
+
+        serializer = self.get_serializer(order)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK
+        )

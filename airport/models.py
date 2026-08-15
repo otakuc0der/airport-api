@@ -5,6 +5,7 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from airport.utils.files import generate_image_file_path
@@ -275,9 +276,36 @@ class Flight(models.Model):
         related_name="flights",
     )
 
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "Scheduled"
+        DELAYED = "delayed", "Delayed"
+        CANCELLED = "cancelled", "Cancelled"
+
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.SCHEDULED
+    )
+
     @property
     def flight_duration(self) -> timedelta:
         return self.arrival_time - self.departure_time
+
+    @property
+    def flight_state(self) -> str:
+        now = timezone.now()
+
+        if self.status == self.Status.CANCELLED:
+            return "cancelled"
+
+        if now < self.departure_time:
+            return self.status
+
+        if self.departure_time <= now < self.arrival_time:
+            return "departed"
+
+        return "arrived"
 
     class Meta:
         ordering = ["-departure_time"]
@@ -328,6 +356,17 @@ class Order(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Status(models.TextChoices):
+        CONFIRMED = "confirmed", "Confirmed"
+        CANCELLED = "cancelled", "Cancelled"
+
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.CONFIRMED,
+    )
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -357,10 +396,22 @@ class Ticket(models.Model):
         related_name="tickets",
     )
 
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        CANCELLED = "cancelled", "Cancelled"
+
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
                 fields=["flight", "row", "seat"],
+                condition=Q(status="active"),
                 name="unique_ticket_flight_row_seat"
             )
         ]

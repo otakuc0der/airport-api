@@ -1,7 +1,8 @@
 from typing import Any
 from uuid import UUID
 
-from django.db import transaction
+from decouple import config
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from airport.models import (
@@ -17,9 +18,17 @@ from airport.models import (
     Ticket,
 )
 from airport.utils.validators import (
+    validate_flight_airplane_change,
+    validate_flight_airplane_schedule,
+    validate_flight_crew_presence,
+    validate_flight_crew_schedule,
     validate_flight_departure_and_arrival_time,
+    validate_flight_modification,
+    validate_flight_status_change,
     validate_route_source_destination,
+    validate_ticket_flight,
     validate_ticket_rows_and_seats_in_row,
+    validate_tickets_flights,
 )
 
 
@@ -59,7 +68,7 @@ class AirportSerializer(serializers.ModelSerializer):
 class AirportListSerializer(AirportSerializer):
     closest_big_city = serializers.SlugRelatedField(
         read_only=True,
-        slug_field="name"
+        slug_field="name",
     )
 
     class Meta(AirportSerializer.Meta):
@@ -77,6 +86,26 @@ class AirportUploadImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Airport
         fields = ["id", "image"]
+
+
+class AirportStatisticsSerializer(serializers.Serializer):
+    airport_id = serializers.UUIDField(
+        read_only=True,
+        source="pk",
+    )
+    airport_name = serializers.CharField(
+        read_only=True,
+        source="name"
+    )
+    departing_routes_count = serializers.IntegerField(read_only=True)
+    arriving_routes_count = serializers.IntegerField(read_only=True)
+    upcoming_departures_count = serializers.IntegerField(read_only=True)
+    upcoming_arrivals_count = serializers.IntegerField(read_only=True)
+    total_upcoming_flights = serializers.IntegerField(read_only=True)
+
+    active_tickets_count = serializers.IntegerField(read_only=True)
+    cancelled_tickets_count = serializers.IntegerField(read_only=True)
+    total_tickets_count = serializers.IntegerField(read_only=True)
 
 
 class AirplaneTypeSerializer(serializers.ModelSerializer):
@@ -147,7 +176,7 @@ class CrewUploadPhotoSerializer(serializers.ModelSerializer):
         model = Crew
         fields = [
             "id",
-            "photo"
+            "photo",
         ]
 
 
@@ -201,14 +230,20 @@ class RouteSerializer(serializers.ModelSerializer):
 
 class RouteListSerializer(RouteSerializer):
     source_city = serializers.CharField(
-        read_only=True, source="source.closest_big_city.name"
+        read_only=True,
+        source="source.closest_big_city.name",
     )
     destination_city = serializers.CharField(
-        read_only=True, source="destination.closest_big_city.name"
+        read_only=True,
+        source="destination.closest_big_city.name",
     )
-    source_airport = serializers.CharField(read_only=True, source="source.name")
+    source_airport = serializers.CharField(
+        read_only=True,
+        source="source.name",
+    )
     destination_airport = serializers.CharField(
-        read_only=True, source="destination.name"
+        read_only=True,
+        source="destination.name",
     )
 
     class Meta(RouteSerializer.Meta):
@@ -227,10 +262,28 @@ class RouteDetailSerializer(RouteSerializer):
     destination = AirportDetailSerializer(read_only=True)
 
 
+class RoutePopularSerializer(serializers.Serializer):
+    route_id = serializers.UUIDField(
+        source="pk",
+        read_only=True,
+    )
+    route_cities = serializers.CharField(
+        read_only=True,
+        source="route_name",
+    )
+    route_airports = serializers.CharField(
+        read_only=True,
+        source="route_airports_names",
+    )
+    flights_count = serializers.IntegerField(read_only=True)
+    tickets_count = serializers.IntegerField(read_only=True)
+
+
 class FlightSerializer(serializers.ModelSerializer):
     route = serializers.PrimaryKeyRelatedField(
         queryset=Route.objects.select_related(
-            "source__closest_big_city", "destination__closest_big_city"
+            "source__closest_big_city",
+            "destination__closest_big_city"
         ),
     )
     airplane = serializers.PrimaryKeyRelatedField(
@@ -249,6 +302,7 @@ class FlightSerializer(serializers.ModelSerializer):
             "airplane",
             "departure_time",
             "arrival_time",
+            "status",
             "crew",
         ]
 
@@ -275,25 +329,90 @@ class FlightSerializer(serializers.ModelSerializer):
             serializers.ValidationError,
         )
 
+        status_value = attrs.get("status")
+
+        validate_flight_modification(
+            self.instance,
+            serializers.ValidationError,
+        )
+
+        validate_flight_status_change(
+            status_value,
+            serializers.ValidationError,
+        )
+
+        crew = attrs.get("crew")
+
+        if self.instance is not None and crew is None:
+            crew = list(self.instance.crew.all())
+
+        validate_flight_crew_presence(
+            crew,
+            serializers.ValidationError,
+        )
+
+        validate_flight_crew_schedule(
+            crew,
+            self.instance,
+            departure_time,
+            arrival_time,
+            serializers.ValidationError,
+        )
+
+        airplane = attrs.get("airplane")
+
+        if self.instance is not None and airplane is None:
+            airplane = self.instance.airplane
+
+        validate_flight_airplane_change(
+            self.instance,
+            airplane,
+            serializers.ValidationError,
+        )
+
+        validate_flight_airplane_schedule(
+            airplane,
+            self.instance,
+            departure_time,
+            arrival_time,
+            serializers.ValidationError,
+        )
         return attrs
+
+
+class FlightCancelSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    status = serializers.CharField(read_only=True)
 
 
 class FlightListSerializer(FlightSerializer):
     source = serializers.CharField(
-        read_only=True, source="route.source.closest_big_city.name"
+        read_only=True,
+        source="route.source.closest_big_city.name"
     )
     destination = serializers.CharField(
-        read_only=True, source="route.destination.closest_big_city.name"
+        read_only=True,
+        source="route.destination.closest_big_city.name"
     )
-    airplane = serializers.SlugRelatedField(read_only=True, slug_field="name")
+    airplane = serializers.SlugRelatedField(
+        read_only=True,
+        slug_field="name"
+    )
     airplane_type = serializers.CharField(
-        read_only=True, source="airplane.airplane_type.name"
+        read_only=True,
+        source="airplane.airplane_type.name"
     )
     crew = serializers.SlugRelatedField(
-        many=True, read_only=True, slug_field="full_name"
+        many=True,
+        read_only=True,
+        slug_field="full_name"
     )
     flight_duration = serializers.DurationField(read_only=True)
     available_seats = serializers.IntegerField(read_only=True)
+    current_state = serializers.CharField(
+        read_only=True,
+        source="flight_state"
+    )
 
     class Meta(FlightSerializer.Meta):
         fields = [
@@ -305,8 +424,19 @@ class FlightListSerializer(FlightSerializer):
             "crew",
             "departure_time",
             "arrival_time",
+            "status",
+            "current_state",
             "flight_duration",
             "available_seats",
+        ]
+
+
+class TicketTakenSeatsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ticket
+        fields = [
+            "row",
+            "seat"
         ]
 
 
@@ -315,6 +445,15 @@ class FlightDetailSerializer(FlightSerializer):
     airplane = AirplaneDetailSerializer(read_only=True)
     flight_duration = serializers.DurationField(read_only=True)
     crew = CrewSerializer(many=True, read_only=True)
+    taken_seats = TicketTakenSeatsSerializer(
+        many=True,
+        read_only=True,
+        source="active_tickets"
+    )
+    current_state = serializers.CharField(
+        read_only=True,
+        source="flight_state"
+    )
 
     class Meta(FlightSerializer.Meta):
         fields = [
@@ -323,8 +462,11 @@ class FlightDetailSerializer(FlightSerializer):
             "airplane",
             "departure_time",
             "arrival_time",
+            "status",
+            "current_state",
             "flight_duration",
             "crew",
+            "taken_seats",
         ]
 
 
@@ -344,6 +486,11 @@ class TicketSerializer(serializers.ModelSerializer):
             "row",
             "seat",
             "flight",
+            "status",
+        ]
+        read_only_fields = [
+            "id",
+            "status"
         ]
 
     def validate(
@@ -377,6 +524,13 @@ class TicketListSerializer(TicketSerializer):
     flight = FlightListSerializer(read_only=True)
 
 
+MAX_TICKETS_PER_ORDER = config(
+    "MAX_TICKETS_PER_ORDER",
+    default=3,
+    cast=int
+)
+
+
 class OrderSerializer(serializers.ModelSerializer):
     tickets = TicketSerializer(
         many=True,
@@ -388,10 +542,12 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "tickets",
+            "status",
             "created_at",
         ]
         read_only_fields = [
             "id",
+            "status",
             "created_at",
         ]
 
@@ -399,10 +555,24 @@ class OrderSerializer(serializers.ModelSerializer):
         self,
         tickets: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        if len(tickets) > MAX_TICKETS_PER_ORDER:
+            raise serializers.ValidationError(
+                f"An order cannot contain more "
+                f"than {MAX_TICKETS_PER_ORDER} tickets."
+            )
+
+        validate_tickets_flights(tickets, serializers.ValidationError)
+
         requested_seats: set[tuple[UUID, int, int]] = set()
 
         for ticket in tickets:
             flight = ticket["flight"]
+
+            validate_ticket_flight(
+                flight,
+                serializers.ValidationError
+            )
+
             row = ticket["row"]
             seat = ticket["seat"]
 
@@ -424,6 +594,7 @@ class OrderSerializer(serializers.ModelSerializer):
                 flight=flight,
                 row=row,
                 seat=seat,
+                status=Ticket.Status.ACTIVE,
             ).exists():
                 raise serializers.ValidationError(
                     (
@@ -437,19 +608,32 @@ class OrderSerializer(serializers.ModelSerializer):
         return tickets
 
     def create(
-        self,
-        validated_data: dict[str, Any],
+            self,
+            validated_data: dict[str, Any],
     ) -> Order:
         tickets_data = validated_data.pop("tickets")
 
-        with transaction.atomic():
-            order = Order.objects.create(**validated_data)
+        try:
+            with transaction.atomic():
+                order = Order.objects.create(**validated_data)
 
-            for ticket_data in tickets_data:
-                Ticket.objects.create(
-                    order=order,
-                    **ticket_data,
-                )
+                for ticket_data in tickets_data:
+                    Ticket.objects.create(
+                        order=order,
+                        **ticket_data,
+                    )
+
+        except IntegrityError as exc:
+            raise serializers.ValidationError(
+                {
+                    "tickets": [
+                        (
+                            "One or more selected seats are no longer "
+                            "available. Please choose different seats."
+                        ),
+                    ],
+                }
+            ) from exc
 
         return order
 
@@ -461,16 +645,26 @@ class OrderListSerializer(OrderSerializer):
         fields = [
             "id",
             "tickets_count",
+            "status",
             "created_at",
         ]
 
 
 class OrderDetailSerializer(OrderSerializer):
-    tickets = TicketListSerializer(many=True, read_only=True)
+    tickets = TicketListSerializer(
+        many=True,
+        read_only=True,
+    )
 
     class Meta(OrderSerializer.Meta):
         fields = [
             "id",
             "tickets",
+            "status",
             "created_at",
         ]
+
+
+class OrderCancelSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    status = serializers.CharField(read_only=True)
