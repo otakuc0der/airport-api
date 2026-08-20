@@ -107,6 +107,7 @@ def validate_ticket_rows_and_seats_in_row(
             }
         )
 
+
 def validate_flight_crew_presence(
     crew: Sequence[Crew] | None,
     error_to_raise: ValidationErrorType,
@@ -119,6 +120,7 @@ def validate_flight_crew_presence(
                 ],
             }
         )
+
 
 def get_conflicting_flights(
     *,
@@ -158,6 +160,7 @@ def get_conflicting_flights(
         )
         .distinct()
     )
+
 
 def validate_flight_crew_schedule(
     crew: Sequence[Crew] | None,
@@ -216,6 +219,7 @@ def validate_flight_crew_schedule(
             }
         )
 
+
 def validate_flight_airplane_schedule(
     airplane: Airplane | None,
     current_flight: Flight | None,
@@ -250,6 +254,7 @@ def validate_flight_airplane_schedule(
             }
         )
 
+
 def validate_ticket_flight(
     flight: Flight | None,
     error_to_raise: ValidationErrorType,
@@ -277,6 +282,7 @@ def validate_ticket_flight(
             }
         )
 
+
 def validate_flight_modification(
     flight: Flight | None,
     error_to_raise: ValidationErrorType,
@@ -295,6 +301,7 @@ def validate_flight_modification(
             }
         )
 
+
 def validate_flight_status_change(
     status: str | None,
     error_to_raise: ValidationErrorType,
@@ -309,6 +316,7 @@ def validate_flight_status_change(
                 ],
             }
         )
+
 
 def validate_flight_cancellation(
     flight: Flight,
@@ -333,6 +341,7 @@ def validate_flight_cancellation(
                 ],
             }
         )
+
 
 def validate_order_cancellation(
     order: Order,
@@ -370,6 +379,7 @@ def validate_order_cancellation(
             }
         )
 
+
 def validate_tickets_flights(
     tickets: list[dict[str, Any]],
     error_to_raise: FieldValidationErrorType,
@@ -385,6 +395,7 @@ def validate_tickets_flights(
                 "All tickets in an order must belong to the same flight.",
             ]
         )
+
 
 def validate_flight_airplane_change(
     flight: Flight | None,

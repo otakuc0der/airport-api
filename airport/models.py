@@ -290,7 +290,6 @@ class Flight(models.Model):
         DELAYED = "delayed", "Delayed"
         CANCELLED = "cancelled", "Cancelled"
 
-
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -369,7 +368,6 @@ class Order(models.Model):
         CONFIRMED = "confirmed", "Confirmed"
         CANCELLED = "cancelled", "Cancelled"
 
-
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -408,7 +406,6 @@ class Ticket(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         CANCELLED = "cancelled", "Cancelled"
-
 
     status = models.CharField(
         max_length=20,
