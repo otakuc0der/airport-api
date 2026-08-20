@@ -10,7 +10,23 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand
 
-PASSWORD = config("FIXTURE_PASSWORD", default="password123")
+from airport.models import (
+    Flight,
+    Order,
+    Ticket,
+)
+
+
+PASSWORD = config(
+    "FIXTURE_PASSWORD",
+    default="password123",
+)
+
+MAX_TICKETS_PER_ORDER = config(
+    "MAX_TICKETS_PER_ORDER",
+    default=3,
+    cast=int,
+)
 
 
 def make_uuid(name: str) -> str:
@@ -25,41 +41,66 @@ def make_uuid(name: str) -> str:
 class Command(BaseCommand):
     help = "Generate complete airport service fixture"
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(
+        self,
+        *args: Any,
+        **options: Any,
+    ) -> None:
         fixture: list[dict[str, Any]] = []
 
-        country_ids = self.generate_countries(fixture)
+        country_ids = self.generate_countries(
+            fixture,
+        )
+
         city_ids = self.generate_cities(
             fixture=fixture,
             country_ids=country_ids,
         )
+
         airport_ids = self.generate_airports(
             fixture=fixture,
             city_ids=city_ids,
         )
-        airplane_type_ids = self.generate_airplane_types(fixture)
+
+        airplane_type_ids = self.generate_airplane_types(
+            fixture,
+        )
+
         airplanes = self.generate_airplanes(
             fixture=fixture,
             airplane_type_ids=airplane_type_ids,
         )
-        crew_ids = self.generate_crew(fixture)
+
+        crew_ids = self.generate_crew(
+            fixture,
+        )
+
         route_ids = self.generate_routes(
             fixture=fixture,
             airport_ids=airport_ids,
         )
-        flight_ids, flight_departures = self.generate_flights(
+
+        (
+            flight_ids,
+            flight_departures,
+            flight_statuses,
+        ) = self.generate_flights(
             fixture=fixture,
             route_ids=route_ids,
             airplanes=airplanes,
             crew_ids=crew_ids,
         )
-        user_ids = self.generate_users(fixture)
+
+        user_ids = self.generate_users(
+            fixture,
+        )
 
         self.generate_orders_and_tickets(
             fixture=fixture,
             user_ids=user_ids,
             flight_ids=flight_ids,
             flight_departures=flight_departures,
+            flight_statuses=flight_statuses,
             airplanes=airplanes,
         )
 
@@ -86,9 +127,23 @@ class Command(BaseCommand):
                 ensure_ascii=False,
             )
 
-        self.stdout.write(self.style.SUCCESS(f"Fixture created: {output_path}"))
-        self.stdout.write(self.style.SUCCESS(f"Objects created: {len(fixture)}"))
-        self.stdout.write(self.style.WARNING(f"Password for all users: {PASSWORD}"))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Fixture created: {output_path}"
+            )
+        )
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Objects created: {len(fixture)}"
+            )
+        )
+
+        self.stdout.write(
+            self.style.WARNING(
+                f"Password for all users: {PASSWORD}"
+            )
+        )
 
     @staticmethod
     def generate_countries(
@@ -108,8 +163,13 @@ class Command(BaseCommand):
         country_ids: dict[str, str] = {}
 
         for country_name in countries:
-            country_id = make_uuid(f"country-{country_name}")
-            country_ids[country_name] = country_id
+            country_id = make_uuid(
+                f"country-{country_name}"
+            )
+
+            country_ids[
+                country_name
+            ] = country_id
 
             fixture.append(
                 {
@@ -146,8 +206,13 @@ class Command(BaseCommand):
         city_ids: dict[str, str] = {}
 
         for city_name, country_name in cities:
-            city_id = make_uuid(f"city-{city_name}-{country_name}")
-            city_ids[city_name] = city_id
+            city_id = make_uuid(
+                f"city-{city_name}-{country_name}"
+            )
+
+            city_ids[
+                city_name
+            ] = city_id
 
             fixture.append(
                 {
@@ -155,7 +220,9 @@ class Command(BaseCommand):
                     "pk": city_id,
                     "fields": {
                         "name": city_name,
-                        "country": country_ids[country_name],
+                        "country": country_ids[
+                            country_name
+                        ],
                     },
                 }
             )
@@ -168,25 +235,66 @@ class Command(BaseCommand):
         city_ids: dict[str, str],
     ) -> dict[str, str]:
         airports = [
-            ("Boryspil International Airport", "Kyiv"),
-            ("Lviv International Airport", "Lviv"),
-            ("Odesa International Airport", "Odesa"),
-            ("Warsaw Chopin Airport", "Warsaw"),
-            ("Krakow John Paul II Airport", "Krakow"),
-            ("Berlin Brandenburg Airport", "Berlin"),
-            ("Munich International Airport", "Munich"),
-            ("Paris Charles de Gaulle Airport", "Paris"),
-            ("Rome Fiumicino Airport", "Rome"),
-            ("Milan Malpensa Airport", "Milan"),
-            ("Madrid Barajas Airport", "Madrid"),
-            ("Prague Vaclav Havel Airport", "Prague"),
+            (
+                "Boryspil International Airport",
+                "Kyiv",
+            ),
+            (
+                "Lviv International Airport",
+                "Lviv",
+            ),
+            (
+                "Odesa International Airport",
+                "Odesa",
+            ),
+            (
+                "Warsaw Chopin Airport",
+                "Warsaw",
+            ),
+            (
+                "Krakow John Paul II Airport",
+                "Krakow",
+            ),
+            (
+                "Berlin Brandenburg Airport",
+                "Berlin",
+            ),
+            (
+                "Munich International Airport",
+                "Munich",
+            ),
+            (
+                "Paris Charles de Gaulle Airport",
+                "Paris",
+            ),
+            (
+                "Rome Fiumicino Airport",
+                "Rome",
+            ),
+            (
+                "Milan Malpensa Airport",
+                "Milan",
+            ),
+            (
+                "Madrid Barajas Airport",
+                "Madrid",
+            ),
+            (
+                "Prague Vaclav Havel Airport",
+                "Prague",
+            ),
         ]
 
         airport_ids: dict[str, str] = {}
 
         for airport_name, city_name in airports:
-            airport_id = make_uuid(f"airport-{airport_name}")
-            airport_ids[city_name] = airport_id
+            airport_id = make_uuid(
+                f"airport-{airport_name}"
+            )
+
+            airport_ids[
+                city_name
+            ] = airport_id
 
             fixture.append(
                 {
@@ -194,7 +302,10 @@ class Command(BaseCommand):
                     "pk": airport_id,
                     "fields": {
                         "name": airport_name,
-                        "closest_big_city": city_ids[city_name],
+                        "closest_big_city": city_ids[
+                            city_name
+                        ],
+                        "image": "",
                     },
                 }
             )
@@ -222,8 +333,13 @@ class Command(BaseCommand):
             airplane_types,
             start=1,
         ):
-            airplane_type_id = make_uuid(f"airplane-type-{index}")
-            airplane_type_ids.append(airplane_type_id)
+            airplane_type_id = make_uuid(
+                f"airplane-type-{index}"
+            )
+
+            airplane_type_ids.append(
+                airplane_type_id
+            )
 
             fixture.append(
                 {
@@ -243,34 +359,94 @@ class Command(BaseCommand):
         airplane_type_ids: list[str],
     ) -> list[dict[str, Any]]:
         airplanes_data = [
-            ("Sky Voyager UR-001", 20, 6, 0),
-            ("Sky Voyager UR-002", 22, 6, 1),
-            ("European Star UR-003", 28, 8, 2),
-            ("Dream Flight UR-004", 26, 8, 3),
-            ("City Runner UR-005", 18, 6, 4),
-            ("City Runner UR-006", 21, 6, 5),
-            ("Continental Express UR-007", 24, 6, 6),
-            ("Continental Express UR-008", 19, 5, 7),
-            ("Global Wings UR-009", 25, 6, 0),
-            ("Global Wings UR-010", 23, 6, 5),
+            (
+                "Sky Voyager UR-001",
+                20,
+                6,
+                0,
+            ),
+            (
+                "Sky Voyager UR-002",
+                22,
+                6,
+                1,
+            ),
+            (
+                "European Star UR-003",
+                28,
+                8,
+                2,
+            ),
+            (
+                "Dream Flight UR-004",
+                26,
+                8,
+                3,
+            ),
+            (
+                "City Runner UR-005",
+                18,
+                6,
+                4,
+            ),
+            (
+                "City Runner UR-006",
+                21,
+                6,
+                5,
+            ),
+            (
+                "Continental Express UR-007",
+                24,
+                6,
+                6,
+            ),
+            (
+                "Continental Express UR-008",
+                19,
+                5,
+                7,
+            ),
+            (
+                "Global Wings UR-009",
+                25,
+                6,
+                0,
+            ),
+            (
+                "Global Wings UR-010",
+                23,
+                6,
+                5,
+            ),
         ]
 
-        airplanes: list[dict[str, Any]] = []
+        airplanes: list[
+            dict[str, Any]
+        ] = []
 
         for index, (
             name,
             rows,
             seats_in_row,
             airplane_type_index,
-        ) in enumerate(airplanes_data, start=1):
-            airplane_id = make_uuid(f"airplane-{index}")
+        ) in enumerate(
+            airplanes_data,
+            start=1,
+        ):
+            airplane_id = make_uuid(
+                f"airplane-{index}"
+            )
 
             airplane = {
                 "id": airplane_id,
                 "rows": rows,
                 "seats_in_row": seats_in_row,
             }
-            airplanes.append(airplane)
+
+            airplanes.append(
+                airplane
+            )
 
             fixture.append(
                 {
@@ -280,7 +456,11 @@ class Command(BaseCommand):
                         "name": name,
                         "rows": rows,
                         "seats_in_row": seats_in_row,
-                        "airplane_type": (airplane_type_ids[airplane_type_index]),
+                        "airplane_type": (
+                            airplane_type_ids[
+                                airplane_type_index
+                            ]
+                        ),
                         "image": "",
                     },
                 }
@@ -316,9 +496,17 @@ class Command(BaseCommand):
         for index, (
             first_name,
             last_name,
-        ) in enumerate(crew_members, start=1):
-            crew_id = make_uuid(f"crew-{index}")
-            crew_ids.append(crew_id)
+        ) in enumerate(
+            crew_members,
+            start=1,
+        ):
+            crew_id = make_uuid(
+                f"crew-{index}"
+            )
+
+            crew_ids.append(
+                crew_id
+            )
 
             fixture.append(
                 {
@@ -327,6 +515,7 @@ class Command(BaseCommand):
                     "fields": {
                         "first_name": first_name,
                         "last_name": last_name,
+                        "photo": "",
                     },
                 }
             )
@@ -367,17 +556,31 @@ class Command(BaseCommand):
             source_city,
             destination_city,
             distance,
-        ) in enumerate(routes, start=1):
-            route_id = make_uuid(f"route-{index}")
-            route_ids.append(route_id)
+        ) in enumerate(
+            routes,
+            start=1,
+        ):
+            route_id = make_uuid(
+                f"route-{index}"
+            )
+
+            route_ids.append(
+                route_id
+            )
 
             fixture.append(
                 {
                     "model": "airport.route",
                     "pk": route_id,
                     "fields": {
-                        "source": airport_ids[source_city],
-                        "destination": (airport_ids[destination_city]),
+                        "source": airport_ids[
+                            source_city
+                        ],
+                        "destination": (
+                            airport_ids[
+                                destination_city
+                            ]
+                        ),
                         "distance": distance,
                     },
                 }
@@ -394,6 +597,7 @@ class Command(BaseCommand):
     ) -> tuple[
         list[str],
         dict[str, datetime],
+        dict[str, str],
     ]:
         first_departure = datetime(
             2026,
@@ -405,28 +609,89 @@ class Command(BaseCommand):
         )
 
         flight_ids: list[str] = []
-        flight_departures: dict[str, datetime] = {}
+        flight_departures: dict[
+            str,
+            datetime,
+        ] = {}
+        flight_statuses: dict[
+            str,
+            str,
+        ] = {}
 
-        # Между вылетами 6 часов, а полёт длится максимум 4 часа.
-        # Поэтому рейсы не пересекаются по времени.
         for index in range(48):
-            flight_id = make_uuid(f"flight-{index + 1}")
-            flight_ids.append(flight_id)
+            flight_number = index + 1
 
-            departure_time = first_departure + timedelta(hours=index * 6)
+            flight_id = make_uuid(
+                f"flight-{flight_number}"
+            )
 
-            duration_hours = 2 + index % 3
+            flight_ids.append(
+                flight_id
+            )
 
-            arrival_time = departure_time + timedelta(hours=duration_hours)
+            departure_time = (
+                first_departure
+                + timedelta(
+                    hours=index * 6
+                )
+            )
 
-            flight_departures[flight_id] = departure_time
+            duration_hours = (
+                2 + index % 3
+            )
 
-            first_crew_index = (index * 3) % len(crew_ids)
+            arrival_time = (
+                departure_time
+                + timedelta(
+                    hours=duration_hours
+                )
+            )
+
+            flight_departures[
+                flight_id
+            ] = departure_time
+
+            if flight_number % 12 == 0:
+                flight_status = (
+                    Flight.Status.CANCELLED
+                )
+
+            elif flight_number % 5 == 0:
+                flight_status = (
+                    Flight.Status.DELAYED
+                )
+
+            else:
+                flight_status = (
+                    Flight.Status.SCHEDULED
+                )
+
+            flight_statuses[
+                flight_id
+            ] = flight_status
+
+            first_crew_index = (
+                index * 3
+            ) % len(crew_ids)
 
             flight_crew = [
-                crew_ids[first_crew_index],
-                crew_ids[(first_crew_index + 1) % len(crew_ids)],
-                crew_ids[(first_crew_index + 2) % len(crew_ids)],
+                crew_ids[
+                    first_crew_index
+                ],
+                crew_ids[
+                    (
+                        first_crew_index
+                        + 1
+                    )
+                    % len(crew_ids)
+                ],
+                crew_ids[
+                    (
+                        first_crew_index
+                        + 2
+                    )
+                    % len(crew_ids)
+                ],
             ]
 
             fixture.append(
@@ -434,44 +699,139 @@ class Command(BaseCommand):
                     "model": "airport.flight",
                     "pk": flight_id,
                     "fields": {
-                        "route": (route_ids[index % len(route_ids)]),
-                        "airplane": (airplanes[index % len(airplanes)]["id"]),
-                        "departure_time": (departure_time.isoformat()),
-                        "arrival_time": (arrival_time.isoformat()),
+                        "route": route_ids[
+                            index
+                            % len(route_ids)
+                        ],
+                        "airplane": (
+                            airplanes[
+                                index
+                                % len(airplanes)
+                            ]["id"]
+                        ),
+                        "departure_time": (
+                            departure_time.isoformat()
+                        ),
+                        "arrival_time": (
+                            arrival_time.isoformat()
+                        ),
                         "crew": flight_crew,
+                        "status": flight_status,
                     },
                 }
             )
 
-        return flight_ids, flight_departures
+        return (
+            flight_ids,
+            flight_departures,
+            flight_statuses,
+        )
 
     @staticmethod
     def generate_users(
         fixture: list[dict[str, Any]],
     ) -> list[int]:
         user = get_user_model()
-        user_model = user._meta.label_lower
+        user_model = (
+            user._meta.label_lower
+        )
 
         users_data = [
-            ("passenger1@example.com", False, False),
-            ("passenger2@example.com", False, False),
-            ("passenger3@example.com", False, False),
-            ("passenger4@example.com", False, False),
-            ("passenger5@example.com", False, False),
-            ("passenger6@example.com", False, False),
-            ("passenger7@example.com", False, False),
-            ("passenger8@example.com", False, False),
-            ("passenger9@example.com", False, False),
-            ("passenger10@example.com", False, False),
-            ("passenger11@example.com", False, False),
-            ("passenger12@example.com", False, False),
-            ("passenger13@example.com", False, False),
-            ("passenger14@example.com", False, False),
-            ("passenger15@example.com", False, False),
-            ("staff1@example.com", True, False),
-            ("staff2@example.com", True, False),
-            ("staff3@example.com", True, False),
-            ("admin@example.com", True, True),
+            (
+                "passenger1@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger2@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger3@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger4@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger5@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger6@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger7@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger8@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger9@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger10@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger11@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger12@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger13@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger14@example.com",
+                False,
+                False,
+            ),
+            (
+                "passenger15@example.com",
+                False,
+                False,
+            ),
+            (
+                "staff1@example.com",
+                True,
+                False,
+            ),
+            (
+                "staff2@example.com",
+                True,
+                False,
+            ),
+            (
+                "staff3@example.com",
+                True,
+                False,
+            ),
+            (
+                "admin@example.com",
+                True,
+                True,
+            ),
         ]
 
         user_ids: list[int] = []
@@ -489,25 +849,40 @@ class Command(BaseCommand):
             email,
             is_staff,
             is_superuser,
-        ) in enumerate(users_data, start=1):
-            user_ids.append(user_id)
+        ) in enumerate(
+            users_data,
+            start=1,
+        ):
+            user_ids.append(
+                user_id
+            )
 
-            local_name = email.split("@")[0]
+            local_name = email.split(
+                "@"
+            )[0]
 
             fixture.append(
                 {
                     "model": user_model,
                     "pk": user_id,
                     "fields": {
-                        "password": make_password(PASSWORD),
+                        "password": make_password(
+                            PASSWORD
+                        ),
                         "last_login": None,
-                        "is_superuser": is_superuser,
+                        "is_superuser": (
+                            is_superuser
+                        ),
                         "email": email,
-                        "first_name": local_name.capitalize(),
+                        "first_name": (
+                            local_name.capitalize()
+                        ),
                         "last_name": "User",
                         "is_staff": is_staff,
                         "is_active": True,
-                        "date_joined": date_joined.isoformat(),
+                        "date_joined": (
+                            date_joined.isoformat()
+                        ),
                         "groups": [],
                         "user_permissions": [],
                     },
@@ -521,33 +896,121 @@ class Command(BaseCommand):
         fixture: list[dict[str, Any]],
         user_ids: list[int],
         flight_ids: list[str],
-        flight_departures: dict[str, datetime],
+        flight_departures: dict[
+            str,
+            datetime,
+        ],
+        flight_statuses: dict[
+            str,
+            str,
+        ],
         airplanes: list[dict[str, Any]],
     ) -> None:
-        airplane_by_flight: dict[str, dict[str, Any]] = {}
+        airplane_by_flight: dict[
+            str,
+            dict[str, Any],
+        ] = {}
 
-        for flight_index, flight_id in enumerate(flight_ids):
-            airplane_by_flight[flight_id] = airplanes[flight_index % len(airplanes)]
+        for (
+            flight_index,
+            flight_id,
+        ) in enumerate(
+            flight_ids
+        ):
+            airplane_by_flight[
+                flight_id
+            ] = airplanes[
+                flight_index
+                % len(airplanes)
+            ]
 
-        used_seats: set[tuple[str, int, int]] = set()
+        used_seats: set[
+            tuple[str, int, int]
+        ] = set()
 
-        for user_index, user_id in enumerate(user_ids):
-            # У каждого пользователя будет от 2 до 4 заказов.
-            orders_count = 2 + user_index % 3
+        global_order_index = 0
 
-            for order_index in range(orders_count):
-                flight_index = (user_index * 5 + order_index * 7) % len(flight_ids)
+        for (
+            user_index,
+            user_id,
+        ) in enumerate(
+            user_ids
+        ):
+            orders_count = (
+                2 + user_index % 3
+            )
 
-                flight_id = flight_ids[flight_index]
-                airplane = airplane_by_flight[flight_id]
+            for order_index in range(
+                orders_count
+            ):
+                global_order_index += 1
 
-                order_id = make_uuid(f"order-{user_id}-{order_index + 1}")
+                flight_index = (
+                    user_index * 5
+                    + order_index * 7
+                ) % len(flight_ids)
 
-                departure_time = flight_departures[flight_id]
-
-                created_at = departure_time - timedelta(
-                    days=10 + user_index + order_index
+                flight_id = (
+                    flight_ids[
+                        flight_index
+                    ]
                 )
+
+                airplane = (
+                    airplane_by_flight[
+                        flight_id
+                    ]
+                )
+
+                flight_status = (
+                    flight_statuses[
+                        flight_id
+                    ]
+                )
+
+                order_id = make_uuid(
+                    f"order-{user_id}-"
+                    f"{order_index + 1}"
+                )
+
+                departure_time = (
+                    flight_departures[
+                        flight_id
+                    ]
+                )
+
+                created_at = (
+                    departure_time
+                    - timedelta(
+                        days=(
+                            10
+                            + user_index
+                            + order_index
+                        )
+                    )
+                )
+
+                if (
+                    flight_status
+                    == Flight.Status.CANCELLED
+                ):
+                    order_status = (
+                        Order.Status.CANCELLED
+                    )
+
+                elif (
+                    global_order_index
+                    % 7
+                    == 0
+                ):
+                    order_status = (
+                        Order.Status.CANCELLED
+                    )
+
+                else:
+                    order_status = (
+                        Order.Status.CONFIRMED
+                    )
 
                 fixture.append(
                     {
@@ -555,35 +1018,88 @@ class Command(BaseCommand):
                         "pk": order_id,
                         "fields": {
                             "user": user_id,
-                            "created_at": created_at.isoformat(),
+                            "created_at": (
+                                created_at.isoformat()
+                            ),
+                            "status": (
+                                order_status
+                            ),
                         },
                     }
                 )
 
-                # В каждом заказе от 2 до 4 билетов.
-                tickets_count = 2 + (user_index + order_index) % 3
+                tickets_count = min(
+                    (
+                        2
+                        + (
+                            user_index
+                            + order_index
+                        )
+                        % 2
+                    ),
+                    MAX_TICKETS_PER_ORDER,
+                )
 
-                for ticket_index in range(tickets_count):
-                    row, seat = Command.find_available_seat(
-                        flight_id=flight_id,
-                        rows=airplane["rows"],
-                        seats_in_row=(airplane["seats_in_row"]),
-                        used_seats=used_seats,
+                for ticket_index in range(
+                    tickets_count
+                ):
+                    (
+                        row,
+                        seat,
+                    ) = (
+                        Command.find_available_seat(
+                            flight_id=flight_id,
+                            rows=airplane[
+                                "rows"
+                            ],
+                            seats_in_row=(
+                                airplane[
+                                    "seats_in_row"
+                                ]
+                            ),
+                            used_seats=(
+                                used_seats
+                            ),
+                        )
                     )
 
                     ticket_id = make_uuid(
-                        f"ticket-{user_id}-" f"{order_index + 1}-" f"{ticket_index + 1}"
+                        f"ticket-{user_id}-"
+                        f"{order_index + 1}-"
+                        f"{ticket_index + 1}"
                     )
+
+                    if (
+                        order_status
+                        == Order.Status.CANCELLED
+                    ):
+                        ticket_status = (
+                            Ticket.Status.CANCELLED
+                        )
+
+                    else:
+                        ticket_status = (
+                            Ticket.Status.ACTIVE
+                        )
 
                     fixture.append(
                         {
-                            "model": "airport.ticket",
+                            "model": (
+                                "airport.ticket"
+                            ),
                             "pk": ticket_id,
                             "fields": {
                                 "row": row,
                                 "seat": seat,
-                                "flight": flight_id,
-                                "order": order_id,
+                                "flight": (
+                                    flight_id
+                                ),
+                                "order": (
+                                    order_id
+                                ),
+                                "status": (
+                                    ticket_status
+                                ),
                             },
                         }
                     )
@@ -593,21 +1109,42 @@ class Command(BaseCommand):
         flight_id: str,
         rows: int,
         seats_in_row: int,
-        used_seats: set[tuple[str, int, int]],
+        used_seats: set[
+            tuple[str, int, int]
+        ],
     ) -> tuple[int, int]:
-        for row in range(1, rows + 1):
-            for seat in range(1, seats_in_row + 1):
+        for row in range(
+            1,
+            rows + 1,
+        ):
+            for seat in range(
+                1,
+                seats_in_row + 1,
+            ):
                 seat_key = (
                     flight_id,
                     row,
                     seat,
                 )
 
-                if seat_key in used_seats:
+                if (
+                    seat_key
+                    in used_seats
+                ):
                     continue
 
-                used_seats.add(seat_key)
+                used_seats.add(
+                    seat_key
+                )
 
-                return row, seat
+                return (
+                    row,
+                    seat,
+                )
 
-        raise ValueError(f"No available seats for flight {flight_id}")
+        raise ValueError(
+            (
+                "No available seats "
+                f"for flight {flight_id}"
+            )
+        )
