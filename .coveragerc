@@ -1,0 +1,17 @@
+[run]
+source =
+    airport
+    user
+
+omit =
+    */tests/*
+    */migrations/*
+    */airport/management/*
+    */admin.py
+    */admin_filters.py
+    */apps.py
+    */__init__.py
+
+[report]
+show_missing = True
+skip_covered = True
