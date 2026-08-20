@@ -191,6 +191,25 @@ class RouteFilter(filters.FilterSet):
         fields = []
 
 
+class PopularRouteFilter(filters.FilterSet):
+    limit = filters.NumberFilter(
+        method="limit_popular_routes",
+        label="Limit top popular routes",
+        min_value=1,
+    )
+
+    def limit_popular_routes(
+        self,
+        queryset: QuerySet,
+        name: str,
+        value: int | None,
+    ) -> QuerySet:
+        if value is not None:
+            return queryset[:value]
+
+        return queryset
+
+
 class FlightFilter(filters.FilterSet):
     source = filters.ModelChoiceFilter(
         field_name="route__source",
@@ -343,22 +362,3 @@ class FlightFilter(filters.FilterSet):
     class Meta:
         model = Flight
         fields = []
-
-
-class PopularRouteFilter(filters.FilterSet):
-    limit = filters.NumberFilter(
-        method="limit_popular_routes",
-        label="Limit top popular routes",
-        min_value=1,
-    )
-
-    def limit_popular_routes(
-        self,
-        queryset: QuerySet,
-        name: str,
-        value: int | None,
-    ) -> QuerySet:
-        if value is not None:
-            return queryset[:value]
-
-        return queryset
