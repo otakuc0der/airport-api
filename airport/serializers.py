@@ -492,6 +492,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "id",
             "status"
         ]
+        validators = []
 
     def validate(
         self,
@@ -608,8 +609,8 @@ class OrderSerializer(serializers.ModelSerializer):
         return tickets
 
     def create(
-            self,
-            validated_data: dict[str, Any],
+        self,
+        validated_data: dict[str, Any],
     ) -> Order:
         tickets_data = validated_data.pop("tickets")
 
