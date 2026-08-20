@@ -1625,12 +1625,13 @@ class FlightViewSet(viewsets.ModelViewSet):
             .prefetch_related("crew")
             .annotate(
                 available_seats=(
-                    F("airplane__rows") * F("airplane__seats_in_row")
+                    F("airplane__rows")
+                    * F("airplane__seats_in_row")
                     - Count(
-                    "tickets",
-                    filter=Q(tickets__status=Ticket.Status.ACTIVE),
-                    distinct=True
-                )
+                        "tickets",
+                        filter=Q(tickets__status=Ticket.Status.ACTIVE,),
+                        distinct=True,
+                    )
                 ),
             )
             .order_by("-departure_time", "id")
@@ -1696,7 +1697,6 @@ class FlightViewSet(viewsets.ModelViewSet):
             ).update(
                 status=Order.Status.CANCELLED,
             )
-
 
         serializer = self.get_serializer(flight)
 
