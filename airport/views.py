@@ -1252,7 +1252,7 @@ class RouteViewSet(viewsets.ModelViewSet):
         queryset = Route.objects.select_related(
             "source__closest_big_city__country",
             "destination__closest_big_city__country"
-        )
+        ).order_by("id")
 
         if self.action == "popular_routes":
             queryset = queryset.annotate(
@@ -1814,6 +1814,7 @@ class OrderViewSet(
                     "tickets"
                 ),
             )
+            .order_by("-created_at", "id")
         )
 
         if self.request.user.is_staff:
