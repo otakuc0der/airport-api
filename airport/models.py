@@ -345,7 +345,7 @@ class Flight(models.Model):
         ).strftime("%Y-%m-%d %H:%M")
 
         return (
-            f"Flight '{self.route.source.closest_big_city}-"
+            f"Flight '{self.route.source.closest_big_city} - "
             f"{self.route.destination.closest_big_city}' "
             f"(departure time: {departure_time}; "
             f"arrival time: {arrival_time})"
