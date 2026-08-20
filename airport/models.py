@@ -4,6 +4,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -175,8 +176,16 @@ class Airplane(models.Model):
         editable=False,
     )
     name = models.CharField(max_length=255, unique=True)
-    rows = models.PositiveIntegerField()
-    seats_in_row = models.PositiveIntegerField()
+    rows = models.PositiveIntegerField(
+        validators=[
+            MinValueValidator(1),
+        ],
+    )
+    seats_in_row = models.PositiveIntegerField(
+        validators=[
+            MinValueValidator(1),
+        ],
+    )
     airplane_type = models.ForeignKey(
         AirplaneType,
         on_delete=models.PROTECT,
