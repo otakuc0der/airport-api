@@ -1,13 +1,8 @@
 import uuid
 
 from airport.models import Flight, Ticket
-from airport.serializers import (
-    TicketListSerializer,
-    TicketSerializer,
-)
-from airport.tests.validation.test_flight_validators import (
-    BaseFlightScheduleTestCase,
-)
+from airport.serializers import TicketListSerializer, TicketSerializer
+from airport.tests.base import BaseFlightScheduleTestCase
 
 
 class TicketSerializerTests(BaseFlightScheduleTestCase):

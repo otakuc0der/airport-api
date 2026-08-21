@@ -13,9 +13,7 @@ from airport.serializers import (
     OrderListSerializer,
     OrderSerializer,
 )
-from airport.tests.validation.test_flight_validators import (
-    BaseFlightScheduleTestCase,
-)
+from airport.tests.base import BaseFlightScheduleTestCase
 
 
 class OrderSerializerTests(BaseFlightScheduleTestCase):
@@ -1001,17 +999,57 @@ class OrderDetailSerializerTests(
 
         tickets = serializer.data["tickets"]
 
+        ticket_data = next(
+            ticket
+            for ticket in tickets
+            if ticket["id"] == str(self.ticket_1.pk)
+        )
+
         self.assertEqual(
-            tickets[0]["row"],
+            ticket_data["row"],
             1,
         )
         self.assertEqual(
-            tickets[0]["seat"],
+            ticket_data["seat"],
             1,
         )
         self.assertEqual(
-            tickets[0]["status"],
+            ticket_data["status"],
             Ticket.Status.ACTIVE,
+        )
+
+    def test_order_detail_serializer_returns_all_ticket_data(
+        self,
+    ) -> None:
+        serializer = OrderDetailSerializer(
+            self.order,
+        )
+
+        tickets = serializer.data["tickets"]
+
+        seats = {
+            (
+                ticket["row"],
+                ticket["seat"],
+                ticket["status"],
+            )
+            for ticket in tickets
+        }
+
+        self.assertEqual(
+            seats,
+            {
+                (
+                    1,
+                    1,
+                    Ticket.Status.ACTIVE,
+                ),
+                (
+                    1,
+                    2,
+                    Ticket.Status.ACTIVE,
+                ),
+            },
         )
 
     def test_order_detail_serializer_returns_nested_flight(
