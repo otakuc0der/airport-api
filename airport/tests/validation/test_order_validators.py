@@ -5,9 +5,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 
 from airport.models import Flight, Order, Ticket
-from airport.tests.validation.test_flight_validators import (
-    BaseFlightScheduleTestCase,
-)
+from airport.tests.base import BaseFlightScheduleTestCase
 from airport.utils.validators import validate_order_cancellation
 
 

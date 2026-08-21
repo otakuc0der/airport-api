@@ -4,21 +4,14 @@ from typing import Any
 
 from django.contrib.auth import get_user_model
 
-from airport.models import (
-    Crew,
-    Flight,
-    Order,
-    Ticket,
-)
+from airport.models import Crew, Flight, Order, Ticket
 from airport.serializers import (
     FlightCancelSerializer,
     FlightDetailSerializer,
     FlightListSerializer,
     FlightSerializer,
 )
-from airport.tests.validation.test_flight_validators import (
-    BaseFlightScheduleTestCase,
-)
+from airport.tests.base import BaseFlightScheduleTestCase
 
 
 class FlightSerializerTests(BaseFlightScheduleTestCase):

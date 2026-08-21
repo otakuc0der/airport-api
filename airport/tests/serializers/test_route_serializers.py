@@ -1,10 +1,10 @@
 from airport.models import Airport, City, Route
 from airport.serializers import (
-    RouteSerializer, RouteDetailSerializer, RouteListSerializer,
+    RouteDetailSerializer,
+    RouteListSerializer,
+    RouteSerializer,
 )
-from airport.tests.validation.test_flight_validators import (
-    BaseFlightScheduleTestCase,
-)
+from airport.tests.base import BaseFlightScheduleTestCase
 
 
 class RouteSerializerTests(BaseFlightScheduleTestCase):
