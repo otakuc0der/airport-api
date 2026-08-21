@@ -20,6 +20,7 @@ from drf_spectacular.utils import (
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import (
     AllowAny,
     IsAdminUser,
@@ -575,6 +576,7 @@ class AirportViewSet(viewsets.ModelViewSet):
         detail=True,
         permission_classes=[IsAdminUser],
         url_path="upload-image",
+        parser_classes=[MultiPartParser],
     )
     def upload_airport_image(
         self,
@@ -865,6 +867,7 @@ class AirplaneViewSet(viewsets.ModelViewSet):
         detail=True,
         permission_classes=[IsAdminUser],
         url_path="upload-image",
+        parser_classes=[MultiPartParser],
     )
     def upload_airplane_image(
         self,
@@ -1040,6 +1043,7 @@ class CrewViewSet(viewsets.ModelViewSet):
         detail=True,
         permission_classes=[IsAdminUser],
         url_path="upload-photo",
+        parser_classes=[MultiPartParser],
     )
     def upload_photo(
         self,

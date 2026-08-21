@@ -4,6 +4,7 @@ from typing import Any
 from django import forms
 from django.contrib import admin
 from django.contrib.admin import ModelAdmin
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Count, QuerySet
 from django.http import HttpRequest
@@ -43,6 +44,7 @@ class CrewAdmin(ModelAdmin):
     list_display = [
         "first_name",
         "last_name",
+        "photo",
     ]
     search_fields = [
         "first_name",
@@ -97,6 +99,7 @@ class AirportAdmin(ModelAdmin):
         "name",
         "get_closest_big_city",
         "get_country",
+        "image",
     ]
     list_filter = [
         "closest_big_city__country",
@@ -114,8 +117,13 @@ class AirportAdmin(ModelAdmin):
         **kwargs: Any,
     ) -> forms.Field | None:
         if db_field.name == "closest_big_city":
-            kwargs["queryset"] = City.objects.select_related("country").order_by(
-                "country__name", "name"
+            kwargs["queryset"] = (
+                City.objects
+                .select_related("country")
+                .order_by(
+                    "country__name",
+                    "name",
+                )
             )
 
         return super().formfield_for_foreignkey(
@@ -166,6 +174,7 @@ class AirplaneAdmin(ModelAdmin):
         "rows",
         "seats_in_row",
         "capacity",
+        "image",
     ]
     list_filter = [
         "airplane_type",
@@ -215,10 +224,17 @@ class RouteAdmin(ModelAdmin):
         request: HttpRequest,
         **kwargs: Any,
     ) -> forms.Field | None:
-        if db_field.name in {"source", "destination"}:
-            kwargs["queryset"] = Airport.objects.select_related(
-                "closest_big_city__country",
-            ).order_by("name")
+        if db_field.name in {
+            "source",
+            "destination",
+        }:
+            kwargs["queryset"] = (
+                Airport.objects
+                .select_related(
+                    "closest_big_city__country",
+                )
+                .order_by("name")
+            )
 
         return super().formfield_for_foreignkey(
             db_field,
@@ -273,16 +289,41 @@ class RouteAdmin(ModelAdmin):
         )
 
 
+class FlightAdminForm(forms.ModelForm):
+    class Meta:
+        model = Flight
+        fields = "__all__"
+
+    def clean_status(self) -> str:
+        flight_status = self.cleaned_data["status"]
+
+        if flight_status == Flight.Status.CANCELLED:
+            raise ValidationError(
+                (
+                    "Flight cannot be cancelled by changing "
+                    "its status directly."
+                )
+            )
+
+        return flight_status
+
+
 @admin.register(Flight)
 class FlightAdmin(ModelAdmin):
+    form = FlightAdminForm
+
     list_display = [
         "get_route",
         "get_airplane",
         "departure_time",
         "arrival_time",
         "flight_duration",
+        "status",
+        "get_current_state",
     ]
+
     list_filter = [
+        "status",
         FlightSourceCountryFilter,
         FlightDestinationCountryFilter,
         FlightSourceCityFilter,
@@ -292,6 +333,7 @@ class FlightAdmin(ModelAdmin):
         "departure_time",
         "arrival_time",
     ]
+
     search_fields = [
         "route__source__name",
         "route__destination__name",
@@ -302,12 +344,34 @@ class FlightAdmin(ModelAdmin):
         "airplane__name",
         "airplane__airplane_type__name",
     ]
+
     filter_horizontal = [
         "crew",
     ]
+
     ordering = [
         "-departure_time",
     ]
+
+    readonly_fields = [
+        "get_current_state",
+    ]
+
+    def has_change_permission(
+        self,
+        request: HttpRequest,
+        obj: Flight | None = None,
+    ) -> bool:
+        if (
+            obj is not None
+            and obj.status == Flight.Status.CANCELLED
+        ):
+            return False
+
+        return super().has_change_permission(
+            request,
+            obj,
+        )
 
     def formfield_for_foreignkey(
         self,
@@ -316,15 +380,22 @@ class FlightAdmin(ModelAdmin):
         **kwargs: Any,
     ) -> forms.Field | None:
         if db_field.name == "route":
-            kwargs["queryset"] = Route.objects.select_related(
-                "source__closest_big_city__country",
-                "destination__closest_big_city__country",
+            kwargs["queryset"] = (
+                Route.objects
+                .select_related(
+                    "source__closest_big_city__country",
+                    "destination__closest_big_city__country",
+                )
             )
 
         elif db_field.name == "airplane":
-            kwargs["queryset"] = Airplane.objects.select_related(
-                "airplane_type"
-            ).order_by("name")
+            kwargs["queryset"] = (
+                Airplane.objects
+                .select_related(
+                    "airplane_type",
+                )
+                .order_by("name")
+            )
 
         return super().formfield_for_foreignkey(
             db_field,
@@ -379,15 +450,33 @@ class FlightAdmin(ModelAdmin):
             f"{airplane.capacity} seats"
         )
 
+    @admin.display(
+        description="Current state",
+    )
+    def get_current_state(
+        self,
+        obj: Flight,
+    ) -> str:
+        return obj.flight_state
+
 
 class TicketInline(admin.TabularInline):
     model = Ticket
     extra = 1
+    min_num = 1
+    validate_min = True
+
     fields = [
         "flight",
         "row",
         "seat",
+        "status",
     ]
+
+    readonly_fields = [
+        "status",
+    ]
+
     autocomplete_fields = [
         "flight",
     ]
@@ -413,11 +502,15 @@ class TicketInline(admin.TabularInline):
         **kwargs: Any,
     ) -> forms.Field | None:
         if db_field.name == "flight":
-            kwargs["queryset"] = Flight.objects.select_related(
-                "airplane__airplane_type",
-                "route__source__closest_big_city__country",
-                "route__destination__closest_big_city__country",
-            ).order_by("-departure_time")
+            kwargs["queryset"] = (
+                Flight.objects
+                .select_related(
+                    "airplane__airplane_type",
+                    "route__source__closest_big_city__country",
+                    "route__destination__closest_big_city__country",
+                )
+                .order_by("-departure_time")
+            )
 
         return super().formfield_for_foreignkey(
             db_field,
@@ -434,9 +527,12 @@ class TicketAdmin(ModelAdmin):
         "arrival_time",
         "row",
         "seat",
+        "status",
         "get_user",
     ]
+
     list_filter = [
+        "status",
         TicketSourceCountryFilter,
         TicketDestinationCountryFilter,
         TicketSourceCityFilter,
@@ -444,6 +540,7 @@ class TicketAdmin(ModelAdmin):
         "flight__departure_time",
         "order__created_at",
     ]
+
     search_fields = [
         "order__user__email",
         "flight__airplane__name",
@@ -452,12 +549,18 @@ class TicketAdmin(ModelAdmin):
         "flight__route__source__closest_big_city__name",
         "flight__route__destination__closest_big_city__name",
     ]
+
     ordering = [
         "-flight__departure_time",
     ]
+
     autocomplete_fields = [
         "flight",
         "order",
+    ]
+
+    readonly_fields = [
+        "status",
     ]
 
     def formfield_for_foreignkey(
@@ -467,15 +570,21 @@ class TicketAdmin(ModelAdmin):
         **kwargs: Any,
     ) -> forms.Field | None:
         if db_field.name == "flight":
-            kwargs["queryset"] = Flight.objects.select_related(
-                "route__source__closest_big_city__country",
-                "route__destination__closest_big_city__country",
-                "airplane__airplane_type",
-            ).order_by("-departure_time")
+            kwargs["queryset"] = (
+                Flight.objects
+                .select_related(
+                    "route__source__closest_big_city__country",
+                    "route__destination__closest_big_city__country",
+                    "airplane__airplane_type",
+                )
+                .order_by("-departure_time")
+            )
 
         elif db_field.name == "order":
-            kwargs["queryset"] = Order.objects.select_related("user").order_by(
-                "-created_at"
+            kwargs["queryset"] = (
+                Order.objects
+                .select_related("user")
+                .order_by("-created_at")
             )
 
         return super().formfield_for_foreignkey(
@@ -508,7 +617,9 @@ class TicketAdmin(ModelAdmin):
         obj: Ticket,
     ) -> str:
         source = obj.flight.route.source.closest_big_city
-        destination = obj.flight.route.destination.closest_big_city
+        destination = (
+            obj.flight.route.destination.closest_big_city
+        )
 
         return (
             f"{source.name} ({source.country.name}) → "
@@ -558,19 +669,30 @@ class OrderAdmin(ModelAdmin):
     inlines = [
         TicketInline,
     ]
+
     list_display = [
         "user",
         "created_at",
+        "status",
         "tickets_count",
     ]
+
     list_filter = [
+        "status",
         "created_at",
     ]
+
     search_fields = [
         "user__email",
     ]
+
     ordering = [
         "-created_at",
+    ]
+
+    readonly_fields = [
+        "status",
+        "created_at",
     ]
 
     def get_queryset(
@@ -594,4 +716,8 @@ class OrderAdmin(ModelAdmin):
         self,
         obj: Order,
     ) -> int:
-        return getattr(obj, "tickets_total", 0)
+        return getattr(
+            obj,
+            "tickets_total",
+            0,
+        )
