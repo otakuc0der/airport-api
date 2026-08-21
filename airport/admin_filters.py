@@ -19,12 +19,18 @@ class BaseRelatedFilter(admin.SimpleListFilter):
         queryset: QuerySet,
     ) -> QuerySet:
         if value := self.value():
-            return queryset.filter(**{f"{self.field}_id": value})
+            return queryset.filter(
+                **{
+                    f"{self.field}_id": value,
+                }
+            )
 
         return queryset
 
 
 # City filters
+
+
 class BaseCityFilter(BaseRelatedFilter):
     def lookups(
         self,
@@ -40,15 +46,25 @@ class BaseCityFilter(BaseRelatedFilter):
                     f"{city.name} ({city.country.name})",
                 )
                 for city in (
-                    City.objects.select_related("country").order_by(
-                        "country__name", "name"
+                    City.objects
+                    .select_related("country")
+                    .order_by(
+                        "country__name",
+                        "name",
                     )
                 )
             ]
 
-            setattr(request, cache_name, lookups)
+            setattr(
+                request,
+                cache_name,
+                lookups,
+            )
 
-        return getattr(request, cache_name)
+        return getattr(
+            request,
+            cache_name,
+        )
 
 
 class SourceCityFilter(BaseCityFilter):
@@ -86,6 +102,8 @@ class TicketDestinationCityFilter(DestinationCityFilter):
 
 
 # Country filters
+
+
 class BaseCountryFilter(BaseRelatedFilter):
     def lookups(
         self,
@@ -100,12 +118,21 @@ class BaseCountryFilter(BaseRelatedFilter):
                     str(country.pk),
                     country.name,
                 )
-                for country in Country.objects.order_by("name")
+                for country in (
+                    Country.objects.order_by("name")
+                )
             ]
 
-            setattr(request, cache_name, lookups)
+            setattr(
+                request,
+                cache_name,
+                lookups,
+            )
 
-        return getattr(request, cache_name)
+        return getattr(
+            request,
+            cache_name,
+        )
 
 
 class SourceCountryFilter(BaseCountryFilter):
@@ -122,7 +149,9 @@ class RouteSourceCountryFilter(SourceCountryFilter):
     field = "source__closest_big_city__country"
 
 
-class RouteDestinationCountryFilter(DestinationCountryFilter):
+class RouteDestinationCountryFilter(
+    DestinationCountryFilter,
+):
     field = "destination__closest_big_city__country"
 
 
@@ -130,19 +159,29 @@ class FlightSourceCountryFilter(SourceCountryFilter):
     field = "route__source__closest_big_city__country"
 
 
-class FlightDestinationCountryFilter(DestinationCountryFilter):
+class FlightDestinationCountryFilter(
+    DestinationCountryFilter,
+):
     field = "route__destination__closest_big_city__country"
 
 
 class TicketSourceCountryFilter(SourceCountryFilter):
-    field = "flight__route__source__closest_big_city__country"
+    field = (
+        "flight__route__source__closest_big_city__country"
+    )
 
 
-class TicketDestinationCountryFilter(DestinationCountryFilter):
-    field = "flight__route__destination__closest_big_city__country"
+class TicketDestinationCountryFilter(
+    DestinationCountryFilter,
+):
+    field = (
+        "flight__route__destination__closest_big_city__country"
+    )
 
 
 # Airplane filters
+
+
 class AirplaneTypeFilter(admin.SimpleListFilter):
     title = "airplane type"
     parameter_name = "airplane_type"
@@ -157,7 +196,9 @@ class AirplaneTypeFilter(admin.SimpleListFilter):
                 str(airplane_type.pk),
                 airplane_type.name,
             )
-            for airplane_type in (AirplaneType.objects.order_by("name"))
+            for airplane_type in (
+                AirplaneType.objects.order_by("name")
+            )
         ]
 
     def queryset(
@@ -166,7 +207,9 @@ class AirplaneTypeFilter(admin.SimpleListFilter):
         queryset: QuerySet,
     ) -> QuerySet:
         if value := self.value():
-            return queryset.filter(airplane__airplane_type_id=value)
+            return queryset.filter(
+                airplane__airplane_type_id=value,
+            )
 
         return queryset
 
@@ -185,7 +228,9 @@ class AirplaneFilter(admin.SimpleListFilter):
                 str(airplane.pk),
                 airplane.name,
             )
-            for airplane in Airplane.objects.order_by("name")
+            for airplane in (
+                Airplane.objects.order_by("name")
+            )
         ]
 
     def queryset(
@@ -194,6 +239,8 @@ class AirplaneFilter(admin.SimpleListFilter):
         queryset: QuerySet,
     ) -> QuerySet:
         if value := self.value():
-            return queryset.filter(airplane_id=value)
+            return queryset.filter(
+                airplane_id=value,
+            )
 
         return queryset
