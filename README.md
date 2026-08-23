@@ -986,12 +986,13 @@ committed to Git.
 
 ## Environment variables
 
-The `.env.example` file contains all variables required to run the project
+The `.env.example` file contains the configuration required to run the project
 locally or with Docker Compose.
 
 ```env
 SECRET_KEY=your-secret-key
-DEBUG=True
+DEBUG=your-debug-bool-flag
+ALLOWED_HOSTS=localhost,127.0.0.1
 
 FIXTURE_PASSWORD=your-fixture-password
 MAX_TICKETS_PER_ORDER=5
@@ -1010,6 +1011,7 @@ APP_IMAGE=otakucoder/airport-api:latest
 |---|---|---|
 | `SECRET_KEY` | string | Django cryptographic secret key |
 | `DEBUG` | `True` / `False` | Enables or disables Django debug mode |
+| `ALLOWED_HOSTS` | comma-separated hosts | Hosts that Django is allowed to serve |
 | `FIXTURE_PASSWORD` | string | Password assigned to generated demo users |
 | `MAX_TICKETS_PER_ORDER` | integer | Maximum number of tickets allowed in a single order |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host for running Django directly on the host machine |
@@ -1019,6 +1021,27 @@ APP_IMAGE=otakucoder/airport-api:latest
 | `POSTGRES_DB` | string | PostgreSQL database name |
 | `PGDATA` | filesystem path | PostgreSQL data directory used by the Docker database container |
 | `APP_IMAGE` | Docker image | Application image used by Docker Compose |
+
+### Debug mode and allowed hosts
+
+For local development:
+
+```env
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+```
+
+When `DEBUG=True`, development-only Django Debug Toolbar integration is enabled.
+
+When `DEBUG=False`, Django still validates incoming host names against
+`ALLOWED_HOSTS`, so the allowed hosts should always match the environment in
+which the application is being run.
+
+Additional hosts can be supplied as a comma-separated list:
+
+```env
+ALLOWED_HOSTS=localhost,127.0.0.1,example.com
+```
 
 ### PostgreSQL host
 
@@ -1030,26 +1053,72 @@ localhost:5432
 ```
 
 When the project is started with Docker Compose, the application container must
-connect to the PostgreSQL container through the Compose network. Therefore,
-`docker-compose.yaml` overrides `POSTGRES_HOST`:
+connect to the PostgreSQL container through the Compose network.
+
+Therefore, `docker-compose.yaml` overrides:
 
 ```yaml
 environment:
   POSTGRES_HOST: db
 ```
 
-The application still connects to PostgreSQL on its internal port `5432`.
+The application then connects to:
 
-The Compose port mapping:
+```text
+db:5432
+```
+
+The Compose database port mapping:
 
 ```yaml
 ports:
   - "25432:5432"
 ```
 
-exposes PostgreSQL as `localhost:25432` on the host machine. This mapping is only
-needed when accessing the containerized PostgreSQL database directly from the
-host.
+exposes the containerized PostgreSQL server as:
+
+```text
+localhost:25432
+```
+
+on the host machine.
+
+The `25432` port is not used for communication between the application and
+database containers. Inside the Compose network PostgreSQL continues to use its
+normal port `5432`.
+
+### Static and media paths
+
+When Django is run directly on the host machine, default storage paths are
+located inside the project directory:
+
+```text
+airport-api/
+├── media/
+└── staticfiles/
+```
+
+These defaults are provided by Django settings and do not need to be added to
+`.env`.
+
+Docker uses dedicated filesystem paths instead. The Compose application service
+overrides them:
+
+```yaml
+environment:
+  STATIC_ROOT: /files/static
+  MEDIA_ROOT: /files/media
+```
+
+The corresponding Docker named volumes are mounted to:
+
+```text
+/files/static
+/files/media
+```
+
+This keeps uploaded media and collected static files outside the writable
+container layer and allows them to survive normal container recreation.
 
 ### Application Docker image
 
@@ -1061,14 +1130,29 @@ APP_IMAGE=otakucoder/airport-api:latest
 
 By default, this points to the latest published Airport API image on Docker Hub.
 
-To use a specific release instead, change it to:
+To use a fixed release instead:
 
 ```env
 APP_IMAGE=otakucoder/airport-api:1.0.0
 ```
 
-When building the application locally with Docker Compose, the same image name
-can also be used for the locally built image.
+The same Compose configuration supports both workflows.
+
+To build the image from the current source code:
+
+```bash
+docker compose build
+```
+
+To download the published image instead:
+
+```bash
+docker compose pull app
+docker compose up -d --no-build
+```
+
+When the application is built locally, the value of `APP_IMAGE` is also used as
+the name of the resulting image.
 
 ## 5. Apply migrations
 

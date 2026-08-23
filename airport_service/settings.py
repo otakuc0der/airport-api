@@ -8,7 +8,14 @@ SECRET_KEY = config("SECRET_KEY")
 
 DEBUG = config("DEBUG", default=False, cast=bool)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = config(
+    "ALLOWED_HOSTS",
+    default="localhost,127.0.0.1",
+    cast=lambda value: [
+        host.strip()
+        for host in value.split(",")
+    ],
+)
 
 INTERNAL_IPS = []
 
@@ -41,9 +48,10 @@ if DEBUG:
         "debug_toolbar",
     ]
 
-    MIDDLEWARE += [
+    MIDDLEWARE.insert(
+        1,
         "debug_toolbar.middleware.DebugToolbarMiddleware",
-    ]
+    )
 
     INTERNAL_IPS += [
         "127.0.0.1",
@@ -106,10 +114,20 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/static/"
-STATIC_ROOT = "/files/static"
+STATIC_ROOT = Path(
+    config(
+        "STATIC_ROOT",
+        default=str(BASE_DIR / "staticfiles"),
+    )
+)
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = "/files/media"
+MEDIA_ROOT = Path(
+    config(
+        "MEDIA_ROOT",
+        default=str(BASE_DIR / "media"),
+    )
+)
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
