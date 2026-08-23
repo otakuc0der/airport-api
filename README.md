@@ -893,20 +893,77 @@ Linux/macOS:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-## 3. Install dependencies
+## 3. Create the virtual environment and install dependencies
+
+Create the project virtual environment and install the locked dependencies:
 
 ```bash
 uv sync
 ```
 
-`uv` reads `pyproject.toml` and `uv.lock`, creates or synchronizes the project
-virtual environment, and installs the locked dependency versions.
+`uv` reads `pyproject.toml` and `uv.lock`, creates the project virtual
+environment in `.venv` if it does not already exist, and synchronizes the
+installed dependencies with the locked versions.
 
 The project requires:
 
 ```text
 Python >= 3.14
 ```
+
+### Virtual environment
+
+After running `uv sync`, the project virtual environment is available in:
+
+```text
+.venv/
+```
+
+Activating it manually is optional because the commands in this documentation
+use `uv run`, which automatically executes them inside the project's virtual
+environment.
+
+For example:
+
+```bash
+uv run python manage.py migrate
+uv run python manage.py runserver
+```
+
+If you prefer to activate the virtual environment manually, use:
+
+Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Windows Command Prompt:
+
+```cmd
+.venv\Scripts\activate.bat
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+After activation, commands can be executed directly without `uv run`:
+
+```bash
+python manage.py migrate
+python manage.py runserver
+```
+
+To leave the virtual environment:
+
+```bash
+deactivate
+```
+
+The examples below use `uv run`, so manual activation is not required.
 
 ## 4. Create `.env`
 
