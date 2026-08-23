@@ -57,6 +57,7 @@ Backend REST API for airport operations, flight scheduling, seat booking and ord
 - [Testing](#testing)
 - [Code quality](#code-quality)
 - [Development workflow](#development-workflow)
+- [Author](#author)
 
 </td>
 </tr>
@@ -909,6 +910,8 @@ Python >= 3.14
 
 ## 4. Create `.env`
 
+Create the local environment file from the provided example.
+
 Windows PowerShell:
 
 ```powershell
@@ -921,18 +924,17 @@ Linux/macOS:
 cp .env.example .env
 ```
 
-Keep the real `.env` outside Git.
+The real `.env` file contains environment-specific configuration and must not be
+committed to Git.
 
 ## Environment variables
 
-The example file is designed for a normal local PostgreSQL installation. Values
-such as secrets, credentials and database names should be replaced for your own
-environment; concrete numeric values show the expected format for numeric
-settings.
+The `.env.example` file contains all variables required to run the project
+locally or with Docker Compose.
 
 ```env
 SECRET_KEY=your-secret-key
-DEBUG=your-debug-flag
+DEBUG=True
 
 FIXTURE_PASSWORD=your-fixture-password
 MAX_TICKETS_PER_ORDER=5
@@ -943,31 +945,73 @@ POSTGRES_USER=your-postgres-user
 POSTGRES_PASSWORD=your-postgres-password
 POSTGRES_DB=your-postgres-db
 PGDATA=/var/lib/postgresql/data
+
+APP_IMAGE=otakucoder/airport-api:latest
 ```
 
 | Variable | Example / type | Purpose |
 |---|---|---|
-| `SECRET_KEY` | string | Django cryptographic secret |
-| `DEBUG` | boolean-like string | Enables or disables development debug behavior |
+| `SECRET_KEY` | string | Django cryptographic secret key |
+| `DEBUG` | `True` / `False` | Enables or disables Django debug mode |
 | `FIXTURE_PASSWORD` | string | Password assigned to generated demo users |
-| `MAX_TICKETS_PER_ORDER` | integer | Maximum number of tickets accepted in one order |
-| `POSTGRES_HOST` | `localhost` | PostgreSQL host used by a locally running Django process |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port used by local Django |
+| `MAX_TICKETS_PER_ORDER` | integer | Maximum number of tickets allowed in a single order |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host for running Django directly on the host machine |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port used by Django |
 | `POSTGRES_USER` | string | PostgreSQL user |
 | `POSTGRES_PASSWORD` | string | PostgreSQL password |
 | `POSTGRES_DB` | string | PostgreSQL database name |
-| `PGDATA` | filesystem path | PostgreSQL data directory used by the Docker database service |
+| `PGDATA` | filesystem path | PostgreSQL data directory used by the Docker database container |
+| `APP_IMAGE` | Docker image | Application image used by Docker Compose |
 
-For local execution, Django connects to:
+### PostgreSQL host
+
+When Django is started directly on the host machine, it connects to PostgreSQL
+using the values from `.env`:
 
 ```text
 localhost:5432
 ```
 
-When Docker Compose starts the application container, it overrides only
-`POSTGRES_HOST` with `db`. The application still connects to PostgreSQL on its
-internal port `5432`; the host mapping `25432:5432` is only for accessing the
-containerized database from the laptop.
+When the project is started with Docker Compose, the application container must
+connect to the PostgreSQL container through the Compose network. Therefore,
+`docker-compose.yaml` overrides `POSTGRES_HOST`:
+
+```yaml
+environment:
+  POSTGRES_HOST: db
+```
+
+The application still connects to PostgreSQL on its internal port `5432`.
+
+The Compose port mapping:
+
+```yaml
+ports:
+  - "25432:5432"
+```
+
+exposes PostgreSQL as `localhost:25432` on the host machine. This mapping is only
+needed when accessing the containerized PostgreSQL database directly from the
+host.
+
+### Application Docker image
+
+Docker Compose uses the application image specified by `APP_IMAGE`:
+
+```env
+APP_IMAGE=otakucoder/airport-api:latest
+```
+
+By default, this points to the latest published Airport API image on Docker Hub.
+
+To use a specific release instead, change it to:
+
+```env
+APP_IMAGE=otakucoder/airport-api:1.0.0
+```
+
+When building the application locally with Docker Compose, the same image name
+can also be used for the locally built image.
 
 ## 5. Apply migrations
 
@@ -1199,7 +1243,7 @@ installation are not required for the application itself.
 <td><code>app</code></td>
 <td>Django REST API</td>
 <td><code>8000:8000</code></td>
-<td>Media, static and coverage output</td>
+<td>Media and static files</td>
 </tr>
 <tr>
 <td><code>db</code></td>
