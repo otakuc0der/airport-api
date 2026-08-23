@@ -2,6 +2,7 @@ services:
   app:
     build:
       context: .
+    image: ${APP_IMAGE}
     env_file:
       - .env
     environment:

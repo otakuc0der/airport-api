@@ -22,6 +22,7 @@ RUN uv sync \
     && adduser \
         --disabled-password \
         --no-create-home \
+        --gecos "" \
         appuser \
     && mkdir -p \
         /files/media \
