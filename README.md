@@ -39,7 +39,7 @@ Backend REST API for airport operations, flight scheduling, seat booking and ord
 - [Technology stack](#technology-stack)
 - [Project architecture](#project-architecture)
 - [Database models](#database-models)
-- [Custom business logic](#custom-business-logic)
+- [Business logic and validation](#business-logic-and-validation)
 - [Authentication and permissions](#authentication-and-permissions)
 - [Error handling](#error-handling)
 
@@ -456,11 +456,11 @@ A ticket reserves a concrete row and seat on a flight.
 </tr>
 </table>
 
-This separation is useful because reference objects describe *what exists*,
-flights describe *what is scheduled*, and orders/tickets describe *what users
-have booked*. Most of the custom logic exists at the boundaries between these
-layers: assigning a physical airplane to a flight, assigning crew to a time
-interval, and reserving a seat on that flight.
+Together, these layers form the complete flight booking flow. Reference data
+provides the airports, airplanes and crew needed to schedule flights, while the
+booking layer connects passengers to those flights through orders and tickets.
+This structure keeps static airport data, flight operations and passenger
+bookings separate while allowing them to work together as one system.
 
 ## Database diagram
 
@@ -494,7 +494,7 @@ A flight has two related but intentionally different concepts:
 
 | Status | Meaning |
 |---|---|
-| `scheduled` | The flight remains a normal active flight in the database. It has not been explicitly delayed or cancelled. |
+| `scheduled` | The flight has not been explicitly delayed or cancelled. |
 | `delayed` | Staff explicitly marked the active flight as delayed. |
 | `cancelled` | Staff cancelled the flight through the dedicated cancellation workflow. |
 
@@ -566,9 +566,11 @@ seat for a future booking request.
 
 ---
 
-# Custom business logic
+# Business logic and validation
 
-This section explains the non-CRUD logic that was intentionally added to model real booking behavior.
+This section describes the main business rules and validation logic used for flight scheduling, ticket booking, and cancellation operations.
+
+The API includes both core booking rules and additional safeguards that prevent invalid schedules, conflicting resource assignments, inconsistent booking states, and partial database updates.
 
 ## Business rules at a glance
 
@@ -1160,7 +1162,7 @@ All generated accounts use:
 FIXTURE_PASSWORD=...
 ```
 
-## Suggested walkthrough
+## Demo scenarios
 
 Instead of only checking whether the server starts, the fixture can be used for
 three short end-to-end scenarios.
@@ -1718,7 +1720,7 @@ GET /api/airport/flights/?page=2
 | Resource | List / Create | Detail | Special action |
 |---|---|---|---|
 | Countries | `/countries/` | `/countries/{id}/` | — |
-| Cities | `/cities/` | `/cities/{id}/` | Filters |
+| Cities | `/cities/` | `/cities/{id}/` | — |
 | Airports | `/airports/` | `/airports/{id}/` | `upload-image`, `statistics` |
 | Airplane types | `/airplane-types/` | `/airplane-types/{id}/` | — |
 | Airplanes | `/airplanes/` | `/airplanes/{id}/` | `upload-image` |
@@ -1778,18 +1780,15 @@ Response:
 }
 ```
 
-Deletion can be blocked by protected related cities.
-
 ## Errors
 
 | Status | Condition | Typical response |
 |---|---|---|
 | `400` | Duplicate country name or invalid payload | Field validation error |
+| `400` | Country is still referenced by related cities | Deletion is rejected because the object is protected |
 | `401` | Anonymous write request | Authentication error |
 | `403` | Non-staff authenticated write | Permission denied |
 | `404` | Unknown country ID | Not found |
-| `400/409`-style protected-delete handling | Related cities still reference the country | Deletion is rejected by protected relation handling |
-
 
 ---
 
@@ -1807,11 +1806,11 @@ Deletion can be blocked by protected related cities.
 
 ## Filters
 
-| Parameter | Type | Matching |
-|---|---|---|
-| `country` | UUID | Exact related country |
-| `country_name` | string | Case-insensitive contains |
-| `name` | string | Case-insensitive contains |
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `country` | UUID | Returns cities belonging to the specified country | `?country=country-uuid` |
+| `country_name` | string | Returns cities whose country name contains the supplied value, case-insensitively | `?country_name=Ukraine` |
+| `name` | string | Returns cities whose name contains the supplied value, case-insensitively | `?name=Kyiv` |
 
 Example:
 
@@ -1904,13 +1903,13 @@ an empty result.
 
 ## Filters
 
-| Parameter | Type | Matching |
-|---|---|---|
-| `city` | UUID | Exact city |
-| `city_name` | string | `icontains` |
-| `country` | UUID | Exact country |
-| `country_name` | string | `icontains` |
-| `name` | string | `icontains` |
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `city` | UUID | Returns airports belonging to the specified closest big city | `?city=city-uuid` |
+| `city_name` | string | Returns airports whose closest big city name contains the supplied value, case-insensitively | `?city_name=Kyiv` |
+| `country` | UUID | Returns airports whose closest big city belongs to the specified country | `?country=country-uuid` |
+| `country_name` | string | Returns airports whose country name contains the supplied value, case-insensitively | `?country_name=Ukraine` |
+| `name` | string | Returns airports whose name contains the supplied value, case-insensitively | `?name=Boryspil` |
 
 ## List response
 
@@ -2111,11 +2110,11 @@ List and detail endpoints use the same object shape.
 
 ## Filters
 
-| Parameter | Matching |
-|---|---|
-| `airplane_type` | Exact UUID |
-| `airplane_type_name` | Case-insensitive contains |
-| `name` | Case-insensitive contains |
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `airplane_type` | UUID | Returns airplanes of the specified airplane type | `?airplane_type=airplane-type-uuid` |
+| `airplane_type_name` | string | Returns airplanes whose type name contains the supplied value, case-insensitively | `?airplane_type_name=Boeing` |
+| `name` | string | Returns airplanes whose name contains the supplied value, case-insensitively | `?name=UR-006` |
 
 ## Schema
 
@@ -2251,11 +2250,11 @@ Errors:
 
 ## Filters
 
-| Parameter | Matching |
-|---|---|
-| `first_name` | Case-insensitive contains |
-| `last_name` | Case-insensitive contains |
-| `flight` | Exact flight UUID |
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `first_name` | string | Returns crew members whose first name contains the supplied value, case-insensitively | `?first_name=John` |
+| `last_name` | string | Returns crew members whose last name contains the supplied value, case-insensitively | `?last_name=Smith` |
+| `flight` | UUID | Returns crew members assigned to the specified flight | `?flight=flight-uuid` |
 
 List item:
 
@@ -2332,34 +2331,21 @@ Errors:
 
 ## Filters
 
-| Parameter | Matching |
-|---|---|
-| `source` | Source airport UUID |
-| `destination` | Destination airport UUID |
-| `source_city` | Source city `icontains` |
-| `destination_city` | Destination city `icontains` |
-| `source_country` | Source country `icontains` |
-| `destination_country` | Destination country `icontains` |
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `source` | UUID | Returns routes starting from the specified airport | `?source=airport-uuid` |
+| `destination` | UUID | Returns routes ending at the specified airport | `?destination=airport-uuid` |
+| `source_city` | string | Returns routes whose source city name contains the supplied value, case-insensitively | `?source_city=Kyiv` |
+| `destination_city` | string | Returns routes whose destination city name contains the supplied value, case-insensitively | `?destination_city=Lviv` |
+| `source_country` | string | Returns routes whose source country name contains the supplied value, case-insensitively | `?source_country=Ukraine` |
+| `destination_country` | string | Returns routes whose destination country name contains the supplied value, case-insensitively | `?destination_country=Poland` |
 
-Create:
+## Create request
 
 ```json
 {
   "source": "source-airport-uuid",
   "destination": "destination-airport-uuid",
-  "distance": 470
-}
-```
-
-List response item:
-
-```json
-{
-  "id": "route-uuid",
-  "source_city": "Kyiv",
-  "destination_city": "Lviv",
-  "source_airport": "Boryspil International Airport",
-  "destination_airport": "Lviv International Airport",
   "distance": 470
 }
 ```
@@ -2371,6 +2357,19 @@ List response item:
   "id": "route-uuid",
   "source": "source-airport-uuid",
   "destination": "destination-airport-uuid",
+  "distance": 470
+}
+```
+
+## List response
+
+```json
+{
+  "id": "route-uuid",
+  "source_city": "Kyiv",
+  "destination_city": "Lviv",
+  "source_airport": "Boryspil International Airport",
+  "destination_airport": "Lviv International Airport",
   "distance": 470
 }
 ```
@@ -2413,59 +2412,6 @@ country data:
 }
 ```
 
-## Popular routes
-
-```http
-GET /api/airport/routes/popular/?limit=5
-```
-
-This endpoint answers a different question from the normal route list: it shows
-which routes have the strongest **actual booking activity**.
-
-A route is treated as more popular when passengers have more active tickets on
-its non-cancelled flights. `tickets_count` therefore represents booking demand,
-while `flights_count` shows how many non-cancelled flights currently contribute
-to that route's operational activity.
-
-| Field | Meaning |
-|---|---|
-| `route_id` | Route UUID |
-| `route_cities` | Readable source and destination city pair |
-| `route_airports` | Readable source and destination airport pair |
-| `flights_count` | Number of non-cancelled flights for the route |
-| `tickets_count` | Number of active tickets belonging to non-cancelled flights on the route |
-
-In other words, the endpoint does **not** decide popularity from route distance,
-airport name, or the number of times a route record exists. It derives the
-ranking from real flight/booking data associated with each route. Cancelled
-flights and cancelled tickets do not increase booking popularity.
-
-`limit` controls how many of the highest-ranked routes are returned:
-
-```http
-GET /api/airport/routes/popular/?limit=3
-```
-
-Response:
-
-```json
-[
-  {
-    "route_id": "route-uuid",
-    "route_cities": "Kyiv → Lviv",
-    "route_airports": "Boryspil International Airport → Lviv International Airport",
-    "flights_count": 12,
-    "tickets_count": 30
-  }
-]
-```
-
-`limit` must be a positive number.
-
-<p align="center">
-  <img src="docs/screenshots/popular-routes.png" width="900" alt="Popular routes endpoint">
-</p>
-
 ## Route errors
 
 | Status | Field | Condition |
@@ -2486,6 +2432,81 @@ The same-source/destination rule returns:
 }
 ```
 
+## Popular routes
+
+```http
+GET /api/airport/routes/popular/
+```
+
+The endpoint returns routes ordered by booking popularity.
+
+Popularity is based on active tickets from non-cancelled flights. Routes with
+more active tickets are ranked higher.
+
+`tickets_count` shows the number of active tickets for the route, while
+`flights_count` shows the number of its non-cancelled flights.
+
+Cancelled flights and cancelled tickets are excluded from the ranking.
+
+### Response fields
+
+| Field | Meaning |
+|---|---|
+| `route_id` | Route UUID |
+| `route_cities` | Source and destination cities |
+| `route_airports` | Source and destination airports |
+| `flights_count` | Number of non-cancelled flights for the route |
+| `tickets_count` | Number of active tickets on non-cancelled flights for the route |
+
+### Filters
+
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `limit` | positive integer | Limits the response to the specified number of highest-ranked routes | `?limit=5` |
+
+Without `limit`, the endpoint returns all ranked routes.
+
+Example:
+
+```http
+GET /api/airport/routes/popular/
+```
+
+Response:
+
+```json
+[
+  {
+    "route_id": "route-uuid",
+    "route_cities": "Kyiv → Lviv",
+    "route_airports": "Boryspil International Airport → Lviv International Airport",
+    "flights_count": 12,
+    "tickets_count": 30
+  }
+]
+```
+
+<p align="center">
+  <img src="docs/screenshots/popular-routes.png" width="900" alt="Popular routes endpoint">
+</p>
+
+### Limit the number of results
+
+For example, to return only the three most popular routes:
+
+```http
+GET /api/airport/routes/popular/?limit=3
+```
+
+The routes are still ranked by popularity, but only the first three results are
+returned.
+
+<p align="center">
+  <img src="docs/screenshots/popular-routes-with-limit.png" width="900" alt="Popular routes endpoint with limit filter">
+</p>
+
+`limit` must be a positive integer. Invalid values such as `0`, negative numbers,
+decimal values or non-numeric strings return `400 Bad Request`.
 
 ---
 
@@ -2504,25 +2525,30 @@ The same-source/destination rule returns:
 
 ## Filters
 
-<table>
-<tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr>
-<tr><td><code>source</code></td><td>UUID</td><td>Source airport</td></tr>
-<tr><td><code>destination</code></td><td>UUID</td><td>Destination airport</td></tr>
-<tr><td><code>source_city</code></td><td>string</td><td>Source city contains</td></tr>
-<tr><td><code>destination_city</code></td><td>string</td><td>Destination city contains</td></tr>
-<tr><td><code>departure_time</code></td><td>datetime</td><td>Exact departure</td></tr>
-<tr><td><code>departure_time_range_after</code></td><td>ISO datetime</td><td>Departure lower bound</td></tr>
-<tr><td><code>departure_time_range_before</code></td><td>ISO datetime</td><td>Departure upper bound</td></tr>
-<tr><td><code>arrival_time</code></td><td>datetime</td><td>Exact arrival</td></tr>
-<tr><td><code>arrival_time_range_after</code></td><td>ISO datetime</td><td>Arrival lower bound</td></tr>
-<tr><td><code>arrival_time_range_before</code></td><td>ISO datetime</td><td>Arrival upper bound</td></tr>
-<tr><td><code>airplane</code></td><td>UUID</td><td>Exact airplane</td></tr>
-<tr><td><code>airplane_name</code></td><td>string</td><td>Airplane name contains</td></tr>
-<tr><td><code>crew</code></td><td>UUID(s)</td><td>Crew member IDs</td></tr>
-<tr><td><code>crew_last_names</code></td><td>CSV string</td><td>Any supplied last name</td></tr>
-<tr><td><code>crew_all_last_names</code></td><td>CSV string</td><td>All supplied last names</td></tr>
-<tr><td><code>has_available_seats</code></td><td>boolean</td><td>Only flights with / without seats</td></tr>
-</table>
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `source` | UUID | Returns flights whose route starts from the specified airport | `?source=airport-uuid` |
+| `destination` | UUID | Returns flights whose route ends at the specified airport | `?destination=airport-uuid` |
+| `source_city` | string | Returns flights whose source city name contains the supplied value, case-insensitively | `?source_city=Kyiv` |
+| `destination_city` | string | Returns flights whose destination city name contains the supplied value, case-insensitively | `?destination_city=Lviv` |
+| `departure_time` | datetime | Returns flights with the exact departure time in `YYYY-MM-DD HH:MM` format | `?departure_time=2026-08-25 10:00` |
+| `departure_time_range_after` | ISO datetime | Returns flights departing at or after the supplied datetime | `?departure_time_range_after=2026-08-25T10:00:00Z` |
+| `departure_time_range_before` | ISO datetime | Returns flights departing at or before the supplied datetime | `?departure_time_range_before=2026-08-26T18:00:00Z` |
+| `arrival_time` | datetime | Returns flights with the exact arrival time in `YYYY-MM-DD HH:MM` format | `?arrival_time=2026-08-25 12:00` |
+| `arrival_time_range_after` | ISO datetime | Returns flights arriving at or after the supplied datetime | `?arrival_time_range_after=2026-08-25T12:00:00Z` |
+| `arrival_time_range_before` | ISO datetime | Returns flights arriving at or before the supplied datetime | `?arrival_time_range_before=2026-08-26T20:00:00Z` |
+| `airplane` | UUID | Returns flights assigned to the specified airplane | `?airplane=airplane-uuid` |
+| `airplane_name` | string | Returns flights whose airplane name contains the supplied value, case-insensitively | `?airplane_name=UR-ABC` |
+| `crew` | UUID(s) | Returns flights associated with the specified crew member or crew members | `?crew=crew-uuid-1&crew=crew-uuid-2` |
+| `crew_last_names` | CSV string | Returns flights containing at least one crew member with any of the supplied last names | `?crew_last_names=Smith,Brown` |
+| `crew_all_last_names` | CSV string | Returns flights containing crew members matching all supplied last names | `?crew_all_last_names=Smith,Brown` |
+| `has_available_seats` | boolean | Returns flights depending on whether seats are still available | `?has_available_seats=true` |
+
+`crew_last_names` uses OR-style matching: a flight is returned when at least one
+crew member matches any supplied last name.
+
+`crew_all_last_names` uses AND-style matching: a flight is returned only when
+all supplied last names are represented among its crew members.
 
 Example:
 
@@ -2856,9 +2882,8 @@ Payload:
 
 ### Create order in Swagger
 
-The existing Swagger screenshots remain valid: order creation still accepts the
-same nested ticket payload and returns the compact write representation after a
-successful `201 Created` response.
+The request contains a nested list of tickets with the selected flight and seat coordinates.  
+After successful creation, the API returns `201 Created` with the created order, including its tickets, status, and creation timestamp.
 
 <table>
 <tr>
@@ -2867,7 +2892,7 @@ successful `201 Created` response.
 </tr>
 </table>
 
-## Create response
+### Create response
 
 ```json
 {
@@ -2913,27 +2938,25 @@ The client therefore cannot create an order on behalf of another user.
 
 ## Order filters
 
-Filters are also role-aware.
+Filters are role-aware. All authenticated users can filter the orders available
+to them, while staff users have additional filters for searching orders by
+owner.
 
 ### Available to every authenticated order client
 
-| Parameter | Type | Meaning |
-|---|---|---|
-| `status` | choice | Exact order status (`confirmed` / `cancelled`) |
-| `created_at` | date | Exact creation date |
-| `created_at_after` | date | Orders created on/after the supplied date |
-| `created_at_before` | date | Orders created on/before the supplied date |
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `status` | choice | Returns orders with the specified status (`confirmed` or `cancelled`) | `?status=confirmed` |
+| `created_at` | date | Returns orders created on the specified date | `?created_at=2026-08-25` |
+| `created_at_after` | date | Returns orders created on or after the specified date | `?created_at_after=2026-08-25` |
+| `created_at_before` | date | Returns orders created on or before the specified date | `?created_at_before=2026-08-31` |
 
 ### Additional staff-only filters
 
-| Parameter | Type | Meaning |
-|---|---|---|
-| `user` | user ID | Exact order owner |
-| `user_email` | string | Order owner email lookup |
-
-Regular passengers do not receive owner filters because their queryset is already
-restricted to `request.user`. Staff can use the additional owner filters because
-their queryset contains orders from all users.
+| Parameter | Type | Description | Example |
+|---|---|---|---|
+| `user` | integer | Returns orders belonging to the specified user | `?user=6` |
+| `user_email` | string | Returns orders whose owner's email contains the supplied value, case-insensitively | `?user_email=example.com` |
 
 Examples:
 
@@ -3018,8 +3041,6 @@ Staff receive the owner email in addition to the normal list fields:
 <td><img src="docs/screenshots/order-list-staff.png" alt="Staff order list"></td>
 </tr>
 </table>
-
-The staff screenshot also demonstrates pagination across all visible orders.
 
 ## Detail response
 
@@ -3108,16 +3129,6 @@ The nested flight contains both the persisted `status` and calculated
 `current_state`, together with airplane type, crew, schedule and calculated flight
 duration.
 
-### Order detail screenshots
-
-The older Swagger order-detail screenshot can stay because it shows the passenger
-representation, which is still current. The newer browsable-API screenshots make
-the role difference explicit.
-
-<p align="center">
-  <img src="docs/screenshots/order-detail.png" width="900" alt="Order detail response in Swagger">
-</p>
-
 #### Regular passenger detail
 
 The passenger response contains order and ticket information but does not expose
@@ -3161,9 +3172,7 @@ Response:
 Cancellation is rejected if the order is already cancelled or if cancellation is
 no longer valid because an active non-cancelled flight has departed.
 
-Flight cancellation can also propagate to related orders and tickets. The older
-Swagger before/after screenshots remain valid as long as they still show the same
-`confirmed`/`active` to `cancelled` lifecycle transition.
+Flight cancellation also propagates to related orders and tickets.
 
 ## Order errors
 

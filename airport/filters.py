@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db.models import QuerySet
+from django.forms import IntegerField
 from django_filters import rest_framework as filters
 
 from airport.models import (
@@ -193,11 +194,15 @@ class RouteFilter(filters.FilterSet):
         fields = []
 
 
+class IntegerFilter(filters.Filter):
+    field_class = IntegerField
+
+
 class PopularRouteFilter(filters.FilterSet):
-    limit = filters.NumberFilter(
+    limit = IntegerFilter(
         method="limit_popular_routes",
-        label="Limit top popular routes",
         min_value=1,
+        label="Limit top popular routes",
     )
 
     def limit_popular_routes(
