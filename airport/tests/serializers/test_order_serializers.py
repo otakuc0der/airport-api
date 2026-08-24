@@ -12,6 +12,9 @@ from airport.serializers import (
     OrderDetailSerializer,
     OrderListSerializer,
     OrderSerializer,
+    OrderStaffDetailSerializer,
+    OrderStaffListSerializer,
+    OrderUserSerializer,
 )
 from airport.tests.base import BaseFlightScheduleTestCase
 
@@ -32,7 +35,7 @@ class OrderSerializerTests(BaseFlightScheduleTestCase):
 
         cls.user = get_user_model().objects.create_user(
             email="someone@example.com",
-            password="testpass123",
+            password="password123",
         )
 
     def make_ticket_data(
@@ -787,7 +790,7 @@ class OrderListSerializerTests(
 
         cls.user = get_user_model().objects.create_user(
             email="someone@example.com",
-            password="testpass123",
+            password="password123",
         )
 
         cls.order = Order.objects.create(
@@ -890,7 +893,7 @@ class OrderDetailSerializerTests(
 
         cls.user = get_user_model().objects.create_user(
             email="someone@example.com",
-            password="testpass123",
+            password="password123",
         )
 
         cls.order = Order.objects.create(
@@ -1131,7 +1134,7 @@ class OrderCancelSerializerTests(
 
         cls.user = get_user_model().objects.create_user(
             email="someone@example.com",
-            password="testpass123",
+            password="password123",
         )
 
         cls.cancelled_order = Order.objects.create(
@@ -1196,4 +1199,158 @@ class OrderCancelSerializerTests(
         self.assertEqual(
             serializer.validated_data,
             {},
+        )
+
+
+class OrderStaffListSerializerTests(
+    BaseFlightScheduleTestCase,
+):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+
+        cls.user = get_user_model().objects.create_user(
+            email="staff-owner@example.com",
+            password="password123",
+            first_name="John",
+            last_name="Smith",
+        )
+        cls.order = Order.objects.create(
+            user=cls.user,
+        )
+
+    def setUp(self) -> None:
+        self.order.tickets_count = 0
+
+    def test_staff_list_serializer_returns_expected_fields(
+        self,
+    ) -> None:
+        serializer = OrderStaffListSerializer(
+            self.order,
+        )
+
+        self.assertEqual(
+            set(serializer.data.keys()),
+            {
+                "id",
+                "tickets_count",
+                "status",
+                "created_at",
+                "user",
+            },
+        )
+
+    def test_staff_list_serializer_returns_owner_email(
+        self,
+    ) -> None:
+        serializer = OrderStaffListSerializer(
+            self.order,
+        )
+
+        self.assertEqual(
+            serializer.data["user"],
+            self.user.email,
+        )
+
+
+class OrderUserSerializerTests(
+    BaseFlightScheduleTestCase,
+):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+
+        cls.user = get_user_model().objects.create_user(
+            email="owner@example.com",
+            password="password123",
+            first_name="Anna",
+            last_name="Smith",
+        )
+
+    def test_order_user_serializer_returns_expected_fields(
+        self,
+    ) -> None:
+        serializer = OrderUserSerializer(
+            self.user,
+        )
+
+        self.assertEqual(
+            set(serializer.data.keys()),
+            {
+                "first_name",
+                "last_name",
+                "email",
+            },
+        )
+
+    def test_order_user_serializer_returns_user_data(
+        self,
+    ) -> None:
+        serializer = OrderUserSerializer(
+            self.user,
+        )
+
+        self.assertEqual(
+            serializer.data,
+            {
+                "first_name": self.user.first_name,
+                "last_name": self.user.last_name,
+                "email": self.user.email,
+            },
+        )
+
+
+class OrderStaffDetailSerializerTests(
+    BaseFlightScheduleTestCase,
+):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+
+        cls.user = get_user_model().objects.create_user(
+            email="staff-detail-owner@example.com",
+            password="password123",
+            first_name="John",
+            last_name="Smith",
+        )
+        cls.order = Order.objects.create(
+            user=cls.user,
+        )
+
+    def test_staff_detail_serializer_returns_expected_fields(
+        self,
+    ) -> None:
+        serializer = OrderStaffDetailSerializer(
+            self.order,
+        )
+
+        self.assertEqual(
+            set(serializer.data.keys()),
+            {
+                "id",
+                "tickets",
+                "status",
+                "created_at",
+                "user",
+            },
+        )
+
+    def test_staff_detail_serializer_returns_nested_owner(
+        self,
+    ) -> None:
+        serializer = OrderStaffDetailSerializer(
+            self.order,
+        )
+
+        self.assertEqual(
+            serializer.data["user"],
+            {
+                "first_name": self.user.first_name,
+                "last_name": self.user.last_name,
+                "email": self.user.email,
+            },
+        )
+        self.assertEqual(
+            serializer.data["tickets"],
+            [],
         )

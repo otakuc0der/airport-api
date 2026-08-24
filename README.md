@@ -893,77 +893,20 @@ Linux/macOS:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-## 3. Create the virtual environment and install dependencies
-
-Create the project virtual environment and install the locked dependencies:
+## 3. Install dependencies
 
 ```bash
 uv sync
 ```
 
-`uv` reads `pyproject.toml` and `uv.lock`, creates the project virtual
-environment in `.venv` if it does not already exist, and synchronizes the
-installed dependencies with the locked versions.
+`uv` reads `pyproject.toml` and `uv.lock`, creates or synchronizes the project
+virtual environment, and installs the locked dependency versions.
 
 The project requires:
 
 ```text
 Python >= 3.14
 ```
-
-### Virtual environment
-
-After running `uv sync`, the project virtual environment is available in:
-
-```text
-.venv/
-```
-
-Activating it manually is optional because the commands in this documentation
-use `uv run`, which automatically executes them inside the project's virtual
-environment.
-
-For example:
-
-```bash
-uv run python manage.py migrate
-uv run python manage.py runserver
-```
-
-If you prefer to activate the virtual environment manually, use:
-
-Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Windows Command Prompt:
-
-```cmd
-.venv\Scripts\activate.bat
-```
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-After activation, commands can be executed directly without `uv run`:
-
-```bash
-python manage.py migrate
-python manage.py runserver
-```
-
-To leave the virtual environment:
-
-```bash
-deactivate
-```
-
-The examples below use `uv run`, so manual activation is not required.
 
 ## 4. Create `.env`
 
@@ -986,13 +929,12 @@ committed to Git.
 
 ## Environment variables
 
-The `.env.example` file contains the configuration required to run the project
+The `.env.example` file contains all variables required to run the project
 locally or with Docker Compose.
 
 ```env
 SECRET_KEY=your-secret-key
-DEBUG=your-debug-bool-flag
-ALLOWED_HOSTS=localhost,127.0.0.1
+DEBUG=True
 
 FIXTURE_PASSWORD=your-fixture-password
 MAX_TICKETS_PER_ORDER=5
@@ -1011,7 +953,6 @@ APP_IMAGE=otakucoder/airport-api:latest
 |---|---|---|
 | `SECRET_KEY` | string | Django cryptographic secret key |
 | `DEBUG` | `True` / `False` | Enables or disables Django debug mode |
-| `ALLOWED_HOSTS` | comma-separated hosts | Hosts that Django is allowed to serve |
 | `FIXTURE_PASSWORD` | string | Password assigned to generated demo users |
 | `MAX_TICKETS_PER_ORDER` | integer | Maximum number of tickets allowed in a single order |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host for running Django directly on the host machine |
@@ -1021,27 +962,6 @@ APP_IMAGE=otakucoder/airport-api:latest
 | `POSTGRES_DB` | string | PostgreSQL database name |
 | `PGDATA` | filesystem path | PostgreSQL data directory used by the Docker database container |
 | `APP_IMAGE` | Docker image | Application image used by Docker Compose |
-
-### Debug mode and allowed hosts
-
-For local development:
-
-```env
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-```
-
-When `DEBUG=True`, development-only Django Debug Toolbar integration is enabled.
-
-When `DEBUG=False`, Django still validates incoming host names against
-`ALLOWED_HOSTS`, so the allowed hosts should always match the environment in
-which the application is being run.
-
-Additional hosts can be supplied as a comma-separated list:
-
-```env
-ALLOWED_HOSTS=localhost,127.0.0.1,example.com
-```
 
 ### PostgreSQL host
 
@@ -1053,72 +973,26 @@ localhost:5432
 ```
 
 When the project is started with Docker Compose, the application container must
-connect to the PostgreSQL container through the Compose network.
-
-Therefore, `docker-compose.yaml` overrides:
+connect to the PostgreSQL container through the Compose network. Therefore,
+`docker-compose.yaml` overrides `POSTGRES_HOST`:
 
 ```yaml
 environment:
   POSTGRES_HOST: db
 ```
 
-The application then connects to:
+The application still connects to PostgreSQL on its internal port `5432`.
 
-```text
-db:5432
-```
-
-The Compose database port mapping:
+The Compose port mapping:
 
 ```yaml
 ports:
   - "25432:5432"
 ```
 
-exposes the containerized PostgreSQL server as:
-
-```text
-localhost:25432
-```
-
-on the host machine.
-
-The `25432` port is not used for communication between the application and
-database containers. Inside the Compose network PostgreSQL continues to use its
-normal port `5432`.
-
-### Static and media paths
-
-When Django is run directly on the host machine, default storage paths are
-located inside the project directory:
-
-```text
-airport-api/
-├── media/
-└── staticfiles/
-```
-
-These defaults are provided by Django settings and do not need to be added to
-`.env`.
-
-Docker uses dedicated filesystem paths instead. The Compose application service
-overrides them:
-
-```yaml
-environment:
-  STATIC_ROOT: /files/static
-  MEDIA_ROOT: /files/media
-```
-
-The corresponding Docker named volumes are mounted to:
-
-```text
-/files/static
-/files/media
-```
-
-This keeps uploaded media and collected static files outside the writable
-container layer and allows them to survive normal container recreation.
+exposes PostgreSQL as `localhost:25432` on the host machine. This mapping is only
+needed when accessing the containerized PostgreSQL database directly from the
+host.
 
 ### Application Docker image
 
@@ -1130,29 +1004,14 @@ APP_IMAGE=otakucoder/airport-api:latest
 
 By default, this points to the latest published Airport API image on Docker Hub.
 
-To use a fixed release instead:
+To use a specific release instead, change it to:
 
 ```env
 APP_IMAGE=otakucoder/airport-api:1.0.0
 ```
 
-The same Compose configuration supports both workflows.
-
-To build the image from the current source code:
-
-```bash
-docker compose build
-```
-
-To download the published image instead:
-
-```bash
-docker compose pull app
-docker compose up -d --no-build
-```
-
-When the application is built locally, the value of `APP_IMAGE` is also used as
-the name of the resulting image.
+When building the application locally with Docker Compose, the same image name
+can also be used for the locally built image.
 
 ## 5. Apply migrations
 
@@ -2950,7 +2809,9 @@ Examples:
 
 # Orders
 
-Orders require authentication.
+Orders require authentication. The endpoint is intentionally role-aware: regular
+passengers work only with their own bookings, while staff users can inspect all
+orders and receive additional owner information in list/detail responses.
 
 ## Supported operations
 
@@ -2959,8 +2820,12 @@ Orders require authentication.
 | `GET` | `/api/airport/orders/` | Own orders | All orders |
 | `POST` | `/api/airport/orders/` | Yes | Yes |
 | `GET` | `/api/airport/orders/{id}/` | Own only | Any |
-| `POST` | `/api/airport/orders/{id}/cancel/` | Own only | Any |
+| `POST` | `/api/airport/orders/{id}/cancel/` | Own only | Any visible order |
 | `PUT/PATCH/DELETE` | `/api/airport/orders/{id}/` | Not exposed | Not exposed |
+
+The queryset itself enforces ownership. A regular passenger requesting another
+user's order receives `404 Not Found`; staff users are not restricted to one
+owner.
 
 ## Create order
 
@@ -2991,6 +2856,10 @@ Payload:
 
 ### Create order in Swagger
 
+The existing Swagger screenshots remain valid: order creation still accepts the
+same nested ticket payload and returns the compact write representation after a
+successful `201 Created` response.
+
 <table>
 <tr>
 <td><img src="docs/screenshots/order-create1.png" alt="Order create request"></td>
@@ -3017,6 +2886,9 @@ Payload:
 }
 ```
 
+The authenticated user is assigned by the server and is never accepted from the
+request body.
+
 ## Order creation rules
 
 | Rule | Validation |
@@ -3037,24 +2909,125 @@ The user is always taken from:
 request.user
 ```
 
-The client cannot create an order on behalf of another user.
+The client therefore cannot create an order on behalf of another user.
+
+## Order filters
+
+Filters are also role-aware.
+
+### Available to every authenticated order client
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `status` | choice | Exact order status (`confirmed` / `cancelled`) |
+| `created_at` | date | Exact creation date |
+| `created_at_after` | date | Orders created on/after the supplied date |
+| `created_at_before` | date | Orders created on/before the supplied date |
+
+### Additional staff-only filters
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `user` | user ID | Exact order owner |
+| `user_email` | string | Order owner email lookup |
+
+Regular passengers do not receive owner filters because their queryset is already
+restricted to `request.user`. Staff can use the additional owner filters because
+their queryset contains orders from all users.
+
+Examples:
+
+```http
+GET /api/airport/orders/?status=confirmed&created_at_after=2026-08-20
+```
+
+```http
+GET /api/airport/orders/?user_email=passenger6@example.com
+```
+
+The second example is intended for staff.
+
+### Filters in the browsable API
+
+A regular passenger sees only the common order filters because the queryset is
+already restricted to that authenticated user:
+
+<p align="center">
+  <img src="docs/screenshots/regular-user-order-filters-without-user-filter.png" width="900" alt="Regular user order filters without owner filters">
+</p>
+
+Staff users additionally receive owner filters. The following screenshots show
+filtering the global order list by a concrete user and the resulting filtered
+response:
+
+<table>
+<tr>
+<td><img src="docs/screenshots/order-list-filter-by-user1.png" alt="Staff order filter by user"></td>
+<td><img src="docs/screenshots/order-list-filter-by-user2.png" alt="Staff order list filtered by user"></td>
+</tr>
+</table>
+
+This difference is intentional: passengers cannot query another user's orders,
+while staff can filter the full order queryset by owner ID or owner email.
 
 ## List response
+
+Order lists are paginated and ordered deterministically. The response uses the
+standard project pagination shape:
+
+```json
+{
+  "count": 56,
+  "next": "http://localhost:8000/api/airport/orders/?page=2",
+  "previous": null,
+  "results": []
+}
+```
+
+### Passenger list item
+
+A regular passenger does not need an owner field because every returned order is
+already owned by that passenger:
 
 ```json
 {
   "id": "order-uuid",
   "tickets_count": 2,
   "status": "confirmed",
-  "created_at": "2026-09-01T10:00:00Z"
+  "created_at": "2026-08-25T18:00:00Z"
 }
 ```
+
+### Staff list item
+
+Staff receive the owner email in addition to the normal list fields:
+
+```json
+{
+  "id": "order-uuid",
+  "tickets_count": 2,
+  "status": "confirmed",
+  "created_at": "2026-08-25T18:00:00Z",
+  "user": "passenger6@example.com"
+}
+```
+
+<table>
+<tr>
+<td><img src="docs/screenshots/order-list-regular-user.png" alt="Passenger order list"></td>
+<td><img src="docs/screenshots/order-list-staff.png" alt="Staff order list"></td>
+</tr>
+</table>
+
+The staff screenshot also demonstrates pagination across all visible orders.
 
 ## Detail response
 
 Order detail expands every ticket and, inside each ticket, expands `flight` using
-the flight list representation. This gives the client enough flight context
-without requiring a separate request for every ticket.
+the flight list representation. This gives the client flight context without a
+separate request for every ticket.
+
+### Passenger detail
 
 ```json
 {
@@ -3085,21 +3058,89 @@ without requiring a separate request for every ticket.
     }
   ],
   "status": "confirmed",
-  "created_at": "2026-08-21T21:51:04.012011Z"
+  "created_at": "2026-08-25T18:00:00Z"
 }
 ```
 
-The nested flight contains both:
+### Staff detail
 
-- `status` — the persisted business status;
-- `current_state` — the state calculated from time and stored status.
+For staff, the same detail representation additionally exposes the order owner:
 
-It also includes the airplane type, assigned crew, departure/arrival times and
-calculated flight duration, matching the actual order-detail response.
+```json
+{
+  "id": "order-uuid",
+  "tickets": [
+    {
+      "id": "ticket-uuid",
+      "row": 1,
+      "seat": 1,
+      "flight": {
+        "id": "flight-uuid",
+        "source": "Warsaw",
+        "destination": "Berlin",
+        "airplane": "Continental Express UR-007",
+        "airplane_type": "Airbus A321neo",
+        "crew": [
+          "Benjamin Lewis",
+          "Charlotte Walker",
+          "Lucas Hall"
+        ],
+        "departure_time": "2026-09-12T18:00:00Z",
+        "arrival_time": "2026-09-12T21:00:00Z",
+        "status": "scheduled",
+        "current_state": "scheduled",
+        "flight_duration": "03:00:00"
+      },
+      "status": "active"
+    }
+  ],
+  "status": "confirmed",
+  "created_at": "2026-08-25T18:00:00Z",
+  "user": {
+    "first_name": "Passenger6",
+    "last_name": "User",
+    "email": "passenger6@example.com"
+  }
+}
+```
+
+The nested flight contains both the persisted `status` and calculated
+`current_state`, together with airplane type, crew, schedule and calculated flight
+duration.
+
+### Order detail screenshots
+
+The older Swagger order-detail screenshot can stay because it shows the passenger
+representation, which is still current. The newer browsable-API screenshots make
+the role difference explicit.
 
 <p align="center">
-  <img src="docs/screenshots/order-detail.png" width="900" alt="Order detail response">
+  <img src="docs/screenshots/order-detail.png" width="900" alt="Order detail response in Swagger">
 </p>
+
+#### Regular passenger detail
+
+The passenger response contains order and ticket information but does not expose
+an owner field:
+
+<table>
+<tr>
+<td><img src="docs/screenshots/order-detail-regular-user1.png" alt="Regular user order detail first part"></td>
+<td><img src="docs/screenshots/order-detail-regular-user2.png" alt="Regular user order detail second part"></td>
+</tr>
+</table>
+
+#### Staff detail
+
+The staff response contains the same booking information and additionally exposes
+the nested order owner data:
+
+<table>
+<tr>
+<td><img src="docs/screenshots/order-detail-staff1.png" alt="Staff order detail first part"></td>
+<td><img src="docs/screenshots/order-detail-staff2.png" alt="Staff order detail with owner data"></td>
+</tr>
+</table>
 
 ## Cancel order
 
@@ -3117,7 +3158,12 @@ Response:
 }
 ```
 
-Cancellation is rejected if the order is already cancelled or if cancellation is no longer valid because an active non-cancelled flight has departed.
+Cancellation is rejected if the order is already cancelled or if cancellation is
+no longer valid because an active non-cancelled flight has departed.
+
+Flight cancellation can also propagate to related orders and tickets. The older
+Swagger before/after screenshots remain valid as long as they still show the same
+`confirmed`/`active` to `cancelled` lifecycle transition.
 
 ## Order errors
 
@@ -3497,6 +3543,29 @@ The suite includes boundary and business scenarios such as:
 - flight admin lifecycle restrictions;
 - custom email-based user admin behavior.
 
+## Current verified result
+
+The current complete Docker run executes **854 tests** successfully:
+
+```text
+Found 854 test(s).
+
+Ran 854 tests in 23.997s
+
+OK
+```
+
+The same run reports **100% statement coverage** for the configured application
+source:
+
+```text
+Name     Stmts   Miss   Cover   Missing
+----------------------------------------
+TOTAL     1096      0    100%
+
+16 files skipped due to complete coverage.
+```
+
 ## Coverage
 
 Coverage is measured only for the configured application source. Tests,
@@ -3562,6 +3631,11 @@ htmlcov/index.html
 ```
 
 ### Coverage screenshots
+
+The screenshots below correspond to the current verified run: 854 passing tests,
+1096 measured statements, 0 missed statements and 100% coverage. Because
+`skip_covered = True`, the HTML index may show no individual files when every
+measured file is fully covered; that is expected.
 
 <p align="center">
   <img src="docs/screenshots/tests-coverage1.png" width="900" alt="Airport API test suite result">
