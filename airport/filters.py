@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from django.db.models import QuerySet
 from django_filters import rest_framework as filters
 
@@ -9,6 +10,7 @@ from airport.models import (
     Country,
     Crew,
     Flight,
+    Order,
     Route,
 )
 
@@ -362,3 +364,51 @@ class FlightFilter(filters.FilterSet):
     class Meta:
         model = Flight
         fields = []
+
+
+class OrderFilter(filters.FilterSet):
+    status = filters.ChoiceFilter(
+        field_name="status",
+        choices=Order.Status.choices,
+        label="Order status",
+    )
+
+    created_at = filters.DateFilter(
+        field_name="created_at",
+        lookup_expr="date",
+        label="Created date",
+    )
+
+    created_at_after = filters.DateFilter(
+        field_name="created_at",
+        lookup_expr="date__gte",
+        label="Created from date",
+    )
+
+    created_at_before = filters.DateFilter(
+        field_name="created_at",
+        lookup_expr="date__lte",
+        label="Created to date",
+    )
+
+    class Meta:
+        model = Order
+        fields = []
+
+
+class OrderStaffFilter(OrderFilter):
+    user = filters.ModelChoiceFilter(
+        field_name="user",
+        queryset=get_user_model().objects.all(),
+        error_messages={
+            "invalid_choice": (
+                "User with ID '%(value)s' was not found."
+            ),
+        },
+        label="Order user ID",
+    )
+    user_email = filters.CharFilter(
+        field_name="user__email",
+        lookup_expr="icontains",
+        label="Order user email",
+    )

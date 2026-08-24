@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -1245,4 +1245,522 @@ class OrderViewSetQuerysetTests(TestCase):
         self.assertEqual(
             queryset.model,
             Order,
+        )
+
+
+class OrderOwnerRepresentationApiTests(
+    BaseOrderApiTestCase,
+):
+    def test_regular_user_list_does_not_include_owner(
+        self,
+    ) -> None:
+        client = APIClient()
+        client.force_authenticate(
+            user=self.user,
+        )
+
+        response = client.get(ORDER_URL)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertNotIn(
+            "user",
+            response.data["results"][0],
+        )
+
+    def test_regular_user_detail_does_not_include_owner(
+        self,
+    ) -> None:
+        client = APIClient()
+        client.force_authenticate(
+            user=self.user,
+        )
+
+        response = client.get(
+            order_detail_url(
+                self.user_order.pk,
+            ),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertNotIn(
+            "user",
+            response.data,
+        )
+
+    def test_staff_list_includes_owner_email(
+        self,
+    ) -> None:
+        staff = get_user_model().objects.create_user(
+            email="staff-owner-view@example.com",
+            password="testpass123",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(
+            user=staff,
+        )
+
+        response = client.get(ORDER_URL)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        order_data = next(
+            item
+            for item in response.data["results"]
+            if item["id"] == str(self.other_user_order.pk)
+        )
+
+        self.assertEqual(
+            order_data["user"],
+            self.other_user.email,
+        )
+
+    def test_staff_detail_includes_nested_owner_data(
+        self,
+    ) -> None:
+        self.other_user.first_name = "Other"
+        self.other_user.last_name = "Passenger"
+        self.other_user.save(
+            update_fields=[
+                "first_name",
+                "last_name",
+            ],
+        )
+
+        staff = get_user_model().objects.create_user(
+            email="staff-detail-view@example.com",
+            password="testpass123",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(
+            user=staff,
+        )
+
+        response = client.get(
+            order_detail_url(
+                self.other_user_order.pk,
+            ),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            response.data["user"],
+            {
+                "first_name": "Other",
+                "last_name": "Passenger",
+                "email": self.other_user.email,
+            },
+        )
+
+    def test_superuser_can_view_all_orders_and_owner_data(
+        self,
+    ) -> None:
+        superuser = get_user_model().objects.create_user(
+            email="superuser@example.com",
+            password="testpass123",
+            is_superuser=True,
+            is_staff=False,
+        )
+        client = APIClient()
+        client.force_authenticate(
+            user=superuser,
+        )
+
+        response = client.get(ORDER_URL)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        returned_ids = {
+            item["id"]
+            for item in response.data["results"]
+        }
+
+        self.assertIn(
+            str(self.other_user_order.pk),
+            returned_ids,
+        )
+        self.assertIn(
+            "user",
+            response.data["results"][0],
+        )
+
+
+class AuthenticatedOrderFilterApiTests(
+    BaseOrderApiTestCase,
+):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+
+        cls.old_created_at = cls.NOW - timedelta(days=2)
+        cls.new_created_at = cls.NOW + timedelta(days=2)
+
+        Order.objects.filter(
+            pk=cls.user_order.pk,
+        ).update(
+            created_at=cls.old_created_at,
+        )
+        Order.objects.filter(
+            pk=cls.second_user_order.pk,
+        ).update(
+            created_at=cls.new_created_at,
+        )
+
+        cls.user_order.refresh_from_db()
+        cls.second_user_order.refresh_from_db()
+
+    def setUp(self) -> None:
+        super().setUp()
+
+        self.client = APIClient()
+        self.client.force_authenticate(
+            user=self.user,
+        )
+
+    def result_ids(
+        self,
+        response,
+    ) -> set[str]:
+        return {
+            item["id"]
+            for item in response.data["results"]
+        }
+
+    def test_regular_user_can_filter_own_orders_by_status(
+        self,
+    ) -> None:
+        self.second_user_order.status = Order.Status.CANCELLED
+        self.second_user_order.save(
+            update_fields=["status"],
+        )
+
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "status": Order.Status.CANCELLED,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.second_user_order.pk),
+            },
+        )
+
+    def test_regular_user_can_filter_own_orders_by_exact_created_at(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "created_at": self.old_created_at.date().isoformat(),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.user_order.pk),
+            },
+        )
+
+    def test_regular_user_can_filter_own_orders_created_at_or_after(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "created_at_after": self.NOW.date().isoformat(),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.second_user_order.pk),
+            },
+        )
+
+    def test_regular_user_can_filter_own_orders_created_at_or_before(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "created_at_before": self.NOW.date().isoformat(),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.user_order.pk),
+            },
+        )
+
+    def test_regular_user_can_filter_own_orders_by_creation_range(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "created_at_after": (
+                    self.old_created_at.date().isoformat()
+                ),
+                "created_at_before": (
+                    self.old_created_at.date().isoformat()
+                ),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.user_order.pk),
+            },
+        )
+
+    def test_regular_user_filters_never_return_another_users_orders(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "created_at_after": (
+                    (self.old_created_at - timedelta(days=1))
+                    .date()
+                    .isoformat()
+                ),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertNotIn(
+            str(self.other_user_order.pk),
+            self.result_ids(response),
+        )
+
+
+class StaffOrderFilterApiTests(
+    BaseOrderApiTestCase,
+):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+
+        cls.staff = get_user_model().objects.create_user(
+            email="staff-filter@example.com",
+            password="testpass123",
+            is_staff=True,
+        )
+
+        cls.old_created_at = cls.NOW - timedelta(days=2)
+        cls.middle_created_at = cls.NOW
+        cls.new_created_at = cls.NOW + timedelta(days=2)
+
+        Order.objects.filter(
+            pk=cls.user_order.pk,
+        ).update(
+            created_at=cls.old_created_at,
+        )
+        Order.objects.filter(
+            pk=cls.second_user_order.pk,
+        ).update(
+            created_at=cls.middle_created_at,
+        )
+        Order.objects.filter(
+            pk=cls.other_user_order.pk,
+        ).update(
+            created_at=cls.new_created_at,
+        )
+
+        cls.user_order.refresh_from_db()
+        cls.second_user_order.refresh_from_db()
+        cls.other_user_order.refresh_from_db()
+
+    def setUp(self) -> None:
+        super().setUp()
+
+        self.client = APIClient()
+        self.client.force_authenticate(
+            user=self.staff,
+        )
+
+    def result_ids(
+        self,
+        response,
+    ) -> set[str]:
+        return {
+            item["id"]
+            for item in response.data["results"]
+        }
+
+    def test_staff_can_filter_orders_by_user(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "user": self.other_user.pk,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.other_user_order.pk),
+            },
+        )
+
+    def test_staff_can_filter_orders_by_user_email(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "user_email": "OTHER@",
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.other_user_order.pk),
+            },
+        )
+
+    def test_staff_owner_email_filter_is_case_insensitive_and_partial(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "user_email": "ther@exam",
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.other_user_order.pk),
+            },
+        )
+
+    def test_staff_can_use_common_status_filter(
+        self,
+    ) -> None:
+        self.other_user_order.status = Order.Status.CANCELLED
+        self.other_user_order.save(
+            update_fields=["status"],
+        )
+
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "status": Order.Status.CANCELLED,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.other_user_order.pk),
+            },
+        )
+
+    def test_staff_can_use_common_creation_range_filters(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "created_at_after": (
+                    self.middle_created_at.date().isoformat()
+                ),
+                "created_at_before": (
+                    self.middle_created_at.date().isoformat()
+                ),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.second_user_order.pk),
+            },
+        )
+
+    def test_staff_user_filter_invalid_user_returns_bad_request(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "user": 999999999,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
         )

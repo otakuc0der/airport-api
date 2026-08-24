@@ -13,6 +13,7 @@ from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
     OpenApiParameter,
+    PolymorphicProxySerializer,
     extend_schema,
     extend_schema_view,
 )
@@ -36,6 +37,8 @@ from airport.filters import (
     CityFilter,
     CrewFilter,
     FlightFilter,
+    OrderFilter,
+    OrderStaffFilter,
     PopularRouteFilter,
     RouteFilter,
 )
@@ -87,6 +90,8 @@ from airport.serializers import (
     OrderDetailSerializer,
     OrderListSerializer,
     OrderSerializer,
+    OrderStaffDetailSerializer,
+    OrderStaffListSerializer,
     RouteDetailSerializer,
     RouteListSerializer,
     RoutePopularSerializer,
@@ -1716,11 +1721,78 @@ class FlightViewSet(viewsets.ModelViewSet):
         description=(
             "Return a paginated list of orders available to the current "
             "authenticated user. Regular users can view only their own "
-            "orders, while staff users can view all orders. Each list "
-            "item includes the number of tickets in the order."
+            "orders, while staff users and superusers can view all orders. "
+            "Every list item includes the number of tickets in the order. "
+            "All authenticated users can filter their visible orders by "
+            "status and creation datetime. Staff users and superusers can "
+            "additionally filter orders by owner ID or owner email. Staff "
+            "and superuser responses also include the owner's email."
         ),
+        parameters=[
+            OpenApiParameter(
+                name="status",
+                description="Filter visible orders by status.",
+                required=False,
+                type=OpenApiTypes.STR,
+                enum=[
+                    Order.Status.CONFIRMED,
+                    Order.Status.CANCELLED,
+                ],
+            ),
+            OpenApiParameter(
+                name="created_at",
+                description=(
+                    "Filter visible orders by exact creation datetime."
+                ),
+                required=False,
+                type=OpenApiTypes.DATETIME,
+            ),
+            OpenApiParameter(
+                name="created_at_after",
+                description=(
+                    "Return visible orders created at or after this datetime."
+                ),
+                required=False,
+                type=OpenApiTypes.DATETIME,
+            ),
+            OpenApiParameter(
+                name="created_at_before",
+                description=(
+                    "Return visible orders created at or before this datetime."
+                ),
+                required=False,
+                type=OpenApiTypes.DATETIME,
+            ),
+            OpenApiParameter(
+                name="user",
+                description=(
+                    "Filter orders by owner ID. Available only to staff "
+                    "users and superusers."
+                ),
+                required=False,
+                type=OpenApiTypes.INT,
+            ),
+            OpenApiParameter(
+                name="user_email",
+                description=(
+                    "Filter orders by a partial, case-insensitive owner "
+                    "email. Available only to staff users and superusers."
+                ),
+                required=False,
+                type=OpenApiTypes.STR,
+            ),
+        ],
         responses={
-            200: OrderListSerializer(many=True),
+            200: PolymorphicProxySerializer(
+                component_name="OrderListResponse",
+                serializers=[
+                    OrderListSerializer,
+                    OrderStaffListSerializer,
+                ],
+                resource_type_field_name=None,
+                many=True,
+            ),
+            400: BAD_REQUEST_RESPONSE,
             401: UNAUTHORIZED_RESPONSE,
             429: TOO_MANY_REQUESTS_RESPONSE,
         },
@@ -1730,13 +1802,22 @@ class FlightViewSet(viewsets.ModelViewSet):
     retrieve=extend_schema(
         summary="Retrieve order",
         description=(
-            "Return detailed information about an order identified by "
-            "its ID, including its status, tickets, and related flight "
-            "information. Regular users can retrieve only their own "
-            "orders, while staff users can retrieve any order."
+            "Return detailed information about an order identified by its "
+            "ID, including its status, tickets, and related flight "
+            "information. Regular users can retrieve only their own orders. "
+            "Staff users and superusers can retrieve any order, and their "
+            "response additionally includes the owner's first name, last "
+            "name, and email."
         ),
         responses={
-            200: OrderDetailSerializer,
+            200: PolymorphicProxySerializer(
+                component_name="OrderDetailResponse",
+                serializers=[
+                    OrderDetailSerializer,
+                    OrderStaffDetailSerializer,
+                ],
+                resource_type_field_name=None,
+            ),
             401: UNAUTHORIZED_RESPONSE,
             404: NOT_FOUND_RESPONSE,
             429: TOO_MANY_REQUESTS_RESPONSE,
@@ -1772,14 +1853,14 @@ class FlightViewSet(viewsets.ModelViewSet):
     cancel_order=extend_schema(
         summary="Cancel order",
         description=(
-            "Cancel an order available to the authenticated user. "
-            "An order that is already cancelled cannot be cancelled again. "
-            "The order cannot be cancelled if it contains an active ticket "
-            "for a non-cancelled flight that has already departed. "
-            "When cancellation succeeds, all tickets belonging to the order "
-            "are changed to cancelled status and the order itself is changed "
-            "to cancelled status. Regular users can cancel only their own "
-            "orders, while staff users can cancel any order."
+            "Cancel an order available to the authenticated user. An order "
+            "that is already cancelled cannot be cancelled again. The order "
+            "cannot be cancelled if it contains an active ticket for a "
+            "non-cancelled flight that has already departed. When "
+            "cancellation succeeds, all tickets belonging to the order are "
+            "changed to cancelled status and the order itself is changed to "
+            "cancelled status. Regular users can cancel only their own "
+            "orders, while staff users and superusers can cancel any order."
         ),
         request=None,
         responses={
@@ -1799,6 +1880,22 @@ class OrderViewSet(
     viewsets.GenericViewSet,
 ):
     permission_classes = [IsAuthenticated]
+    filterset_class = OrderFilter
+
+    def _can_view_all_orders(self) -> bool:
+        user = self.request.user
+        return user.is_staff or user.is_superuser
+
+    def filter_queryset(
+        self,
+        queryset: QuerySet[Order],
+    ) -> QuerySet[Order]:
+        if self._can_view_all_orders():
+            self.filterset_class = OrderStaffFilter
+        else:
+            self.filterset_class = OrderFilter
+
+        return super().filter_queryset(queryset)
 
     def get_queryset(self) -> QuerySet[Order]:
         if getattr(self, "swagger_fake_view", False):
@@ -1807,30 +1904,43 @@ class OrderViewSet(
         queryset = (
             Order.objects
             .select_related("user")
-            .prefetch_related(
+            .order_by("-created_at", "id")
+        )
+
+        if self.action == "list":
+            queryset = queryset.annotate(
+                tickets_count=Count("tickets"),
+            )
+
+        if self.action in {
+            "retrieve",
+            "cancel_order",
+        }:
+            queryset = queryset.prefetch_related(
                 "tickets__flight__route__source__closest_big_city__country",
                 "tickets__flight__route__destination__closest_big_city__country",
                 "tickets__flight__airplane__airplane_type",
                 "tickets__flight__crew",
             )
-            .annotate(
-                tickets_count=Count(
-                    "tickets"
-                ),
-            )
-            .order_by("-created_at", "id")
-        )
 
-        if self.request.user.is_staff:
+        if self._can_view_all_orders():
             return queryset
 
-        return queryset.filter(user=self.request.user)
+        return queryset.filter(
+            user=self.request.user,
+        )
 
     def get_serializer_class(self) -> type[BaseSerializer]:
         if self.action == "list":
+            if self._can_view_all_orders():
+                return OrderStaffListSerializer
+
             return OrderListSerializer
 
         if self.action == "retrieve":
+            if self._can_view_all_orders():
+                return OrderStaffDetailSerializer
+
             return OrderDetailSerializer
 
         if self.action == "cancel_order":

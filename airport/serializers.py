@@ -2,6 +2,7 @@ from typing import Any
 from uuid import UUID
 
 from decouple import config
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
@@ -651,6 +652,18 @@ class OrderListSerializer(OrderSerializer):
         ]
 
 
+class OrderStaffListSerializer(OrderListSerializer):
+    user = serializers.CharField(
+        source="user.email",
+        read_only=True
+    )
+
+    class Meta(OrderListSerializer.Meta):
+        fields = OrderListSerializer.Meta.fields + [
+            "user",
+        ]
+
+
 class OrderDetailSerializer(OrderSerializer):
     tickets = TicketListSerializer(
         many=True,
@@ -663,6 +676,26 @@ class OrderDetailSerializer(OrderSerializer):
             "tickets",
             "status",
             "created_at",
+        ]
+
+
+class OrderUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = get_user_model()
+        fields = [
+            "first_name",
+            "last_name",
+            "email",
+        ]
+        read_only_fields = fields
+
+
+class OrderStaffDetailSerializer(OrderDetailSerializer):
+    user = OrderUserSerializer(read_only=True)
+
+    class Meta(OrderDetailSerializer.Meta):
+        fields = OrderDetailSerializer.Meta.fields + [
+            "user",
         ]
 
 
