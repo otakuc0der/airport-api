@@ -797,8 +797,35 @@ class OrderListSerializerTests(
             user=cls.user,
         )
 
+        cls.ticket_1 = Ticket.objects.create(
+            order=cls.order,
+            flight=cls.existing_flight,
+            row=1,
+            seat=1,
+            status=Ticket.Status.ACTIVE,
+        )
+
+        cls.ticket_2 = Ticket.objects.create(
+            order=cls.order,
+            flight=cls.existing_flight,
+            row=1,
+            seat=2,
+            status=Ticket.Status.ACTIVE,
+        )
+
     def setUp(self) -> None:
         self.order.tickets_count = 2
+
+        tickets = list(
+            self.order.tickets.select_related(
+                "flight__route__source__closest_big_city",
+                "flight__route__destination__closest_big_city",
+            ).order_by("id")
+        )
+
+        self.order._prefetched_objects_cache = {
+            "tickets": tickets,
+        }
 
     def test_order_list_serializer_returns_expected_fields(
         self,
@@ -811,6 +838,7 @@ class OrderListSerializerTests(
             set(serializer.data.keys()),
             {
                 "id",
+                "flight",
                 "tickets_count",
                 "status",
                 "created_at",
@@ -827,6 +855,30 @@ class OrderListSerializerTests(
         self.assertEqual(
             serializer.data["id"],
             str(self.order.pk),
+        )
+
+    def test_order_list_serializer_returns_flight(
+        self,
+    ) -> None:
+        serializer = OrderListSerializer(
+            self.order,
+        )
+
+        self.assertEqual(
+            serializer.data["flight"],
+            {
+                "id": str(self.existing_flight.pk),
+                "route": (
+                    f"{self.kyiv.name} → "
+                    f"{self.lviv.name}"
+                ),
+                "departure_time": (
+                    self.existing_flight.departure_time
+                ),
+                "arrival_time": (
+                    self.existing_flight.arrival_time
+                ),
+            },
         )
 
     def test_order_list_serializer_returns_tickets_count(
@@ -881,6 +933,22 @@ class OrderListSerializerTests(
         self.assertEqual(
             serializer.data["status"],
             Order.Status.CANCELLED,
+        )
+
+    def test_order_list_serializer_returns_none_flight_for_empty_order(
+        self,
+    ) -> None:
+        order = Order.objects.create(
+            user=self.user,
+        )
+        order.tickets_count = 0
+
+        serializer = OrderListSerializer(
+            order,
+        )
+
+        self.assertIsNone(
+            serializer.data["flight"],
         )
 
 
@@ -951,6 +1019,7 @@ class OrderDetailSerializerTests(
             set(serializer.data.keys()),
             {
                 "id",
+                "flight",
                 "tickets",
                 "status",
                 "created_at",
@@ -1055,16 +1124,27 @@ class OrderDetailSerializerTests(
             },
         )
 
-    def test_order_detail_serializer_returns_nested_flight(
+    def test_order_detail_tickets_do_not_include_flight(
         self,
     ) -> None:
         serializer = OrderDetailSerializer(
             self.order,
         )
 
-        flight_data = (
-            serializer.data["tickets"][0]["flight"]
+        for ticket in serializer.data["tickets"]:
+            self.assertNotIn(
+                "flight",
+                ticket,
+            )
+
+    def test_order_detail_serializer_returns_flight(
+        self,
+    ) -> None:
+        serializer = OrderDetailSerializer(
+            self.order,
         )
+
+        flight_data = serializer.data["flight"]
 
         self.assertEqual(
             flight_data["id"],
@@ -1108,7 +1188,7 @@ class OrderDetailSerializerTests(
             serializer.data["created_at"],
         )
 
-    def test_order_detail_serializer_returns_empty_tickets_for_empty_order(
+    def test_order_detail_serializer_returns_empty_data_for_empty_order(
         self,
     ) -> None:
         order = Order.objects.create(
@@ -1122,6 +1202,9 @@ class OrderDetailSerializerTests(
         self.assertEqual(
             serializer.data["tickets"],
             [],
+        )
+        self.assertIsNone(
+            serializer.data["flight"],
         )
 
 
@@ -1210,7 +1293,7 @@ class OrderStaffListSerializerTests(
         super().setUpTestData()
 
         cls.user = get_user_model().objects.create_user(
-            email="staff-owner@example.com",
+            email="staff@example.com",
             password="password123",
             first_name="John",
             last_name="Smith",
@@ -1233,6 +1316,7 @@ class OrderStaffListSerializerTests(
             set(serializer.data.keys()),
             {
                 "id",
+                "flight",
                 "tickets_count",
                 "status",
                 "created_at",
@@ -1252,6 +1336,17 @@ class OrderStaffListSerializerTests(
             self.user.email,
         )
 
+    def test_staff_list_serializer_returns_none_flight_for_empty_order(
+        self,
+    ) -> None:
+        serializer = OrderStaffListSerializer(
+            self.order,
+        )
+
+        self.assertIsNone(
+            serializer.data["flight"],
+        )
+
 
 class OrderUserSerializerTests(
     BaseFlightScheduleTestCase,
@@ -1261,7 +1356,7 @@ class OrderUserSerializerTests(
         super().setUpTestData()
 
         cls.user = get_user_model().objects.create_user(
-            email="owner@example.com",
+            email="user@example.com",
             password="password123",
             first_name="Anna",
             last_name="Smith",
@@ -1308,7 +1403,7 @@ class OrderStaffDetailSerializerTests(
         super().setUpTestData()
 
         cls.user = get_user_model().objects.create_user(
-            email="staff-detail-owner@example.com",
+            email="staff@example.com",
             password="password123",
             first_name="John",
             last_name="Smith",
@@ -1328,6 +1423,7 @@ class OrderStaffDetailSerializerTests(
             set(serializer.data.keys()),
             {
                 "id",
+                "flight",
                 "tickets",
                 "status",
                 "created_at",
@@ -1353,4 +1449,7 @@ class OrderStaffDetailSerializerTests(
         self.assertEqual(
             serializer.data["tickets"],
             [],
+        )
+        self.assertIsNone(
+            serializer.data["flight"],
         )

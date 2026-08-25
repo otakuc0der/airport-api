@@ -1722,11 +1722,12 @@ class FlightViewSet(viewsets.ModelViewSet):
             "Return a paginated list of orders available to the current "
             "authenticated user. Regular users can view only their own "
             "orders, while staff users and superusers can view all orders. "
-            "Every list item includes the number of tickets in the order. "
+            "Every list item includes the related flight, the number of "
+            "tickets in the order, order status, and creation datetime. "
             "All authenticated users can filter their visible orders by "
-            "status and creation datetime. Staff users and superusers can "
-            "additionally filter orders by owner ID or owner email. Staff "
-            "and superuser responses also include the owner's email."
+            "status, creation date, and flight. Staff users and superusers "
+            "can additionally filter orders by owner ID or owner email. "
+            "Staff and superuser responses also include the owner's email."
         ),
         parameters=[
             OpenApiParameter(
@@ -1742,26 +1743,35 @@ class FlightViewSet(viewsets.ModelViewSet):
             OpenApiParameter(
                 name="created_at",
                 description=(
-                    "Filter visible orders by exact creation datetime."
+                    "Filter visible orders by exact creation date."
                 ),
                 required=False,
-                type=OpenApiTypes.DATETIME,
+                type=OpenApiTypes.DATE,
             ),
             OpenApiParameter(
                 name="created_at_after",
                 description=(
-                    "Return visible orders created at or after this datetime."
+                    "Return visible orders created on or after this date."
                 ),
                 required=False,
-                type=OpenApiTypes.DATETIME,
+                type=OpenApiTypes.DATE,
             ),
             OpenApiParameter(
                 name="created_at_before",
                 description=(
-                    "Return visible orders created at or before this datetime."
+                    "Return visible orders created on or before this date."
                 ),
                 required=False,
-                type=OpenApiTypes.DATETIME,
+                type=OpenApiTypes.DATE,
+            ),
+            OpenApiParameter(
+                name="flight",
+                description=(
+                    "Filter visible orders by the flight referenced by "
+                    "their tickets."
+                ),
+                required=False,
+                type=OpenApiTypes.UUID,
             ),
             OpenApiParameter(
                 name="user",
@@ -1803,11 +1813,13 @@ class FlightViewSet(viewsets.ModelViewSet):
         summary="Retrieve order",
         description=(
             "Return detailed information about an order identified by its "
-            "ID, including its status, tickets, and related flight "
-            "information. Regular users can retrieve only their own orders. "
-            "Staff users and superusers can retrieve any order, and their "
-            "response additionally includes the owner's first name, last "
-            "name, and email."
+            "ID. Because all tickets in one order belong to the same flight, "
+            "the related flight is returned once at the order level instead "
+            "of being repeated for every ticket. The tickets list contains "
+            "the individual ticket ID, row, seat, and status. Regular users "
+            "can retrieve only their own orders. Staff users and superusers "
+            "can retrieve any order, and their response additionally includes "
+            "the owner's first name, last name, and email."
         ),
         responses={
             200: PolymorphicProxySerializer(
@@ -1834,7 +1846,7 @@ class FlightViewSet(viewsets.ModelViewSet):
             "the configured maximum number of tickets. All tickets in the "
             "same order must belong to the same flight. Requested row and "
             "seat numbers must exist on the airplane assigned to the flight. "
-            "The same seat cannot be duplicated within the request and an "
+            "The same seat cannot be duplicated within the request, and an "
             "already active booked seat cannot be purchased again. Tickets "
             "cannot be purchased for a cancelled flight or after the flight "
             "has departed. The order and all nested tickets are created "
@@ -1887,8 +1899,8 @@ class OrderViewSet(
         return user.is_staff or user.is_superuser
 
     def filter_queryset(
-        self,
-        queryset: QuerySet[Order],
+            self,
+            queryset: QuerySet[Order],
     ) -> QuerySet[Order]:
         if self._can_view_all_orders():
             self.filterset_class = OrderStaffFilter
@@ -1908,19 +1920,67 @@ class OrderViewSet(
         )
 
         if self.action == "list":
-            queryset = queryset.annotate(
-                tickets_count=Count("tickets"),
+            queryset = (
+                queryset
+                .annotate(
+                    tickets_count=Count(
+                        "tickets",
+                        distinct=True,
+                    ),
+                )
+                .prefetch_related(
+                    Prefetch(
+                        "tickets",
+                        queryset=(
+                            Ticket.objects
+                            .select_related(
+                                "flight__route__source__closest_big_city",
+                                "flight__route__destination__closest_big_city",
+                            )
+                            .order_by("id")
+                        ),
+                    ),
+                )
             )
 
-        if self.action in {
-            "retrieve",
-            "cancel_order",
-        }:
+        if self.action == "retrieve":
             queryset = queryset.prefetch_related(
-                "tickets__flight__route__source__closest_big_city__country",
-                "tickets__flight__route__destination__closest_big_city__country",
-                "tickets__flight__airplane__airplane_type",
-                "tickets__flight__crew",
+                Prefetch(
+                    "tickets",
+                    queryset=Ticket.objects.order_by("id"),
+                ),
+                Prefetch(
+                    "tickets__flight",
+                    queryset=(
+                        Flight.objects
+                        .select_related(
+                            "route__source__closest_big_city__country",
+                            "route__destination__closest_big_city__country",
+                            "airplane__airplane_type",
+                        )
+                        .prefetch_related(
+                            "crew",
+                        )
+                        .annotate(
+                            available_seats=(
+                                    F("airplane__rows")
+                                    * F("airplane__seats_in_row")
+                                    - Count(
+                                "tickets",
+                                filter=Q(
+                                    tickets__status=Ticket.Status.ACTIVE,
+                                ),
+                                distinct=True,
+                            )
+                            ),
+                        )
+                    ),
+                ),
+            )
+
+        if self.action == "cancel_order":
+            queryset = queryset.prefetch_related(
+                "tickets__flight",
             )
 
         if self._can_view_all_orders():

@@ -9,6 +9,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from airport.filters import OrderFilter
 from airport.models import (
     Airplane,
     AirplaneType,
@@ -148,12 +149,12 @@ class BaseOrderApiTestCase(TestCase):
 
         cls.user = get_user_model().objects.create_user(
             email="user@example.com",
-            password="testpass123",
+            password="password123",
         )
 
         cls.other_user = get_user_model().objects.create_user(
             email="other@example.com",
-            password="testpass123",
+            password="password123",
         )
 
         cls.user_order = Order.objects.create(
@@ -342,6 +343,65 @@ class AuthenticatedOrderApiTests(
         self.assertEqual(
             response.data["count"],
             2,
+        )
+
+    def test_list_returns_expected_fields(
+        self,
+    ) -> None:
+        response = self.client.get(
+            path=ORDER_URL,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            set(response.data["results"][0].keys()),
+            {
+                "id",
+                "flight",
+                "tickets_count",
+                "status",
+                "created_at",
+            },
+        )
+
+    def test_list_returns_flight_data(
+        self,
+    ) -> None:
+        response = self.client.get(
+            path=ORDER_URL,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        order_data = next(
+            item
+            for item in response.data["results"]
+            if item["id"] == str(self.user_order.pk)
+        )
+
+        self.assertEqual(
+            order_data["flight"]["id"],
+            str(self.flight.pk),
+        )
+        self.assertEqual(
+            order_data["flight"]["route"],
+            f"{self.kyiv.name} → {self.lviv.name}",
+        )
+
+        self.assertIn(
+            "departure_time",
+            order_data["flight"],
+        )
+        self.assertIn(
+            "arrival_time",
+            order_data["flight"],
         )
 
     def test_list_returns_tickets_count(
@@ -1046,7 +1106,7 @@ class AdminOrderApiTests(
 
         cls.admin = get_user_model().objects.create_user(
             email="admin@example.com",
-            password="testpass123",
+            password="password123",
             is_staff=True,
         )
 
@@ -1082,6 +1142,29 @@ class AdminOrderApiTests(
                 str(self.second_user_order.pk),
                 str(self.other_user_order.pk),
             },
+        )
+
+    def test_admin_list_returns_flight_data(
+        self,
+    ) -> None:
+        response = self.client.get(
+            path=ORDER_URL,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        order_data = next(
+            item
+            for item in response.data["results"]
+            if item["id"] == str(self.other_user_order.pk)
+        )
+
+        self.assertEqual(
+            order_data["flight"]["id"],
+            str(self.flight.pk),
         )
 
     def test_admin_can_retrieve_another_users_order(
@@ -1297,8 +1380,8 @@ class OrderOwnerRepresentationApiTests(
         self,
     ) -> None:
         staff = get_user_model().objects.create_user(
-            email="staff-owner-view@example.com",
-            password="testpass123",
+            email="staff@example.com",
+            password="password123",
             is_staff=True,
         )
         client = APIClient()
@@ -1337,8 +1420,8 @@ class OrderOwnerRepresentationApiTests(
         )
 
         staff = get_user_model().objects.create_user(
-            email="staff-detail-view@example.com",
-            password="testpass123",
+            email="staff@example.com",
+            password="password123",
             is_staff=True,
         )
         client = APIClient()
@@ -1370,7 +1453,7 @@ class OrderOwnerRepresentationApiTests(
     ) -> None:
         superuser = get_user_model().objects.create_user(
             email="superuser@example.com",
-            password="testpass123",
+            password="password123",
             is_superuser=True,
             is_staff=False,
         )
@@ -1557,6 +1640,84 @@ class AuthenticatedOrderFilterApiTests(
             },
         )
 
+    def test_regular_user_can_filter_own_orders_by_flight(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": self.flight.pk,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.user_order.pk),
+                str(self.second_user_order.pk),
+            },
+        )
+
+    def test_regular_user_flight_filter_never_returns_another_users_order(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": self.flight.pk,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertNotIn(
+            str(self.other_user_order.pk),
+            self.result_ids(response),
+        )
+
+    def test_flight_filter_returns_bad_request_for_nonexistent_flight(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": uuid.uuid4(),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertIn(
+            "flight",
+            response.data,
+        )
+
+    def test_flight_filter_returns_bad_request_for_invalid_uuid(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": "not-a-uuid",
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     def test_regular_user_filters_never_return_another_users_orders(
         self,
     ) -> None:
@@ -1589,8 +1750,8 @@ class StaffOrderFilterApiTests(
         super().setUpTestData()
 
         cls.staff = get_user_model().objects.create_user(
-            email="staff-filter@example.com",
-            password="testpass123",
+            email="staff@example.com",
+            password="password123",
             is_staff=True,
         )
 
@@ -1698,6 +1859,53 @@ class StaffOrderFilterApiTests(
             },
         )
 
+    def test_staff_can_filter_orders_by_flight(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": self.flight.pk,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.user_order.pk),
+                str(self.second_user_order.pk),
+                str(self.other_user_order.pk),
+            },
+        )
+
+    def test_staff_can_combine_flight_and_user_filter(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": self.flight.pk,
+                "user": self.other_user.pk,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            self.result_ids(response),
+            {
+                str(self.other_user_order.pk),
+            },
+        )
+
     def test_staff_can_use_common_status_filter(
         self,
     ) -> None:
@@ -1763,4 +1971,40 @@ class StaffOrderFilterApiTests(
         self.assertEqual(
             response.status_code,
             status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_staff_flight_filter_nonexistent_flight_returns_bad_request(
+        self,
+    ) -> None:
+        response = self.client.get(
+            ORDER_URL,
+            {
+                "flight": uuid.uuid4(),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class OrderFilterTests(
+    BaseOrderApiTestCase,
+):
+    def test_filter_flight_returns_unchanged_queryset_when_value_is_none(
+        self,
+    ) -> None:
+        queryset = Order.objects.all()
+        order_filter = OrderFilter()
+
+        result = order_filter.filter_flight(
+            queryset=queryset,
+            name="flight",
+            value=None,
+        )
+
+        self.assertIs(
+            result,
+            queryset,
         )

@@ -2010,7 +2010,7 @@ shows a real binary file field rather than a URL string.
 | `total_upcoming_flights` | Departures + arrivals |
 | `active_tickets_count` | Active tickets on departing flights |
 | `cancelled_tickets_count` | Cancelled tickets on departing flights |
-| `total_tickets_count` | Active + cancelled tickets |
+| `total_tickets_count` | Total number of tickets on departing flights, regardless of ticket status |
 
 Example:
 
@@ -2835,23 +2835,22 @@ Examples:
 
 # Orders
 
-Orders require authentication. The endpoint is intentionally role-aware: regular
-passengers work only with their own bookings, while staff users can inspect all
-orders and receive additional owner information in list/detail responses.
+Orders require authentication. Regular passengers work only with their own
+orders, while staff users and superusers can view all orders and receive
+additional owner information in list and detail responses.
 
 ## Supported operations
 
-| Method | URL | Regular user | Staff |
+| Method | URL | Regular user | Staff / superuser |
 |---|---|---:|---:|
 | `GET` | `/api/airport/orders/` | Own orders | All orders |
 | `POST` | `/api/airport/orders/` | Yes | Yes |
-| `GET` | `/api/airport/orders/{id}/` | Own only | Any |
-| `POST` | `/api/airport/orders/{id}/cancel/` | Own only | Any visible order |
+| `GET` | `/api/airport/orders/{id}/` | Own only | Any order |
+| `POST` | `/api/airport/orders/{id}/cancel/` | Own only | Any order |
 | `PUT/PATCH/DELETE` | `/api/airport/orders/{id}/` | Not exposed | Not exposed |
 
-The queryset itself enforces ownership. A regular passenger requesting another
-user's order receives `404 Not Found`; staff users are not restricted to one
-owner.
+Order ownership is enforced at queryset level. If a regular passenger requests
+another user's order, the API returns `404 Not Found`.
 
 ## Create order
 
@@ -2880,10 +2879,13 @@ Payload:
 }
 ```
 
+All tickets in one order must belong to the same flight.
+
 ### Create order in Swagger
 
-The request contains a nested list of tickets with the selected flight and seat coordinates.  
-After successful creation, the API returns `201 Created` with the created order, including its tickets, status, and creation timestamp.
+The request contains a nested list of tickets with the selected flight and seat
+coordinates. After successful creation, the API returns `201 Created` with the
+created order, its tickets, status and creation timestamp.
 
 <table>
 <tr>
@@ -2911,7 +2913,7 @@ After successful creation, the API returns `201 Created` with the created order,
 }
 ```
 
-The authenticated user is assigned by the server and is never accepted from the
+The authenticated user is assigned by the server and is not taken from the
 request body.
 
 ## Order creation rules
@@ -2920,29 +2922,20 @@ request body.
 |---|---|
 | Tickets must be present | Empty list rejected |
 | Maximum tickets | Controlled by `MAX_TICKETS_PER_ORDER` |
-| Same flight | All tickets in one order must reference one flight |
-| Seat coordinates | Must fit airplane layout |
-| Duplicate seat in request | Rejected before database write |
+| Same flight | All tickets must reference one flight |
+| Seat coordinates | Must fit the airplane layout |
+| Duplicate seat in request | Rejected |
 | Existing active seat | Rejected |
-| Cancelled flight | Rejected |
-| Departed flight | Rejected |
-| Creation consistency | Order + tickets created atomically |
-
-The user is always taken from:
-
-```python
-request.user
-```
-
-The client therefore cannot create an order on behalf of another user.
+| Cancelled flight | Ticket purchase rejected |
+| Departed flight | Ticket purchase rejected |
+| Creation consistency | Order and tickets are created atomically |
 
 ## Order filters
 
-Filters are role-aware. All authenticated users can filter the orders available
-to them, while staff users have additional filters for searching orders by
-owner.
+All authenticated users can filter the orders visible to them. Staff users and
+superusers additionally receive filters by order owner.
 
-### Available to every authenticated order client
+### Available to all authenticated users
 
 | Parameter | Type | Description | Example |
 |---|---|---|---|
@@ -2950,6 +2943,13 @@ owner.
 | `created_at` | date | Returns orders created on the specified date | `?created_at=2026-08-25` |
 | `created_at_after` | date | Returns orders created on or after the specified date | `?created_at_after=2026-08-25` |
 | `created_at_before` | date | Returns orders created on or before the specified date | `?created_at_before=2026-08-31` |
+| `flight` | UUID | Returns orders containing tickets for the specified flight | `?flight=flight-uuid` |
+
+The `flight` filter accepts a flight UUID. An invalid UUID or a UUID of a flight
+that does not exist returns `400 Bad Request`.
+
+For a regular passenger, filters are applied only to that passenger's orders.
+For staff users and superusers, they are applied to the full order queryset.
 
 ### Additional staff-only filters
 
@@ -2958,30 +2958,26 @@ owner.
 | `user` | integer | Returns orders belonging to the specified user | `?user=6` |
 | `user_email` | string | Returns orders whose owner's email contains the supplied value, case-insensitively | `?user_email=example.com` |
 
-Examples:
+Filters can be combined:
+
+```http
+GET /api/airport/orders/?flight=flight-uuid&user=6
+```
 
 ```http
 GET /api/airport/orders/?status=confirmed&created_at_after=2026-08-20
 ```
 
-```http
-GET /api/airport/orders/?user_email=passenger6@example.com
-```
-
-The second example is intended for staff.
-
 ### Filters in the browsable API
 
 A regular passenger sees only the common order filters because the queryset is
-already restricted to that authenticated user:
+already restricted to their own orders:
 
 <p align="center">
   <img src="docs/screenshots/regular-user-order-filters-without-user-filter.png" width="900" alt="Regular user order filters without owner filters">
 </p>
 
-Staff users additionally receive owner filters. The following screenshots show
-filtering the global order list by a concrete user and the resulting filtered
-response:
+Staff users additionally receive owner filters:
 
 <table>
 <tr>
@@ -2990,52 +2986,61 @@ response:
 </tr>
 </table>
 
-This difference is intentional: passengers cannot query another user's orders,
-while staff can filter the full order queryset by owner ID or owner email.
-
 ## List response
 
-Order lists are paginated and ordered deterministically. The response uses the
-standard project pagination shape:
+Order lists are paginated and ordered deterministically.
 
-```json
-{
-  "count": 56,
-  "next": "http://localhost:8000/api/airport/orders/?page=2",
-  "previous": null,
-  "results": []
-}
-```
+Each item contains a compact representation of the flight associated with the
+order. Since all tickets in one order belong to the same flight, flight
+information is represented once at the order level.
+
+The `tickets_count` field contains the total number of tickets in the order.
 
 ### Passenger list item
-
-A regular passenger does not need an owner field because every returned order is
-already owned by that passenger:
 
 ```json
 {
   "id": "order-uuid",
+  "flight": {
+    "id": "flight-uuid",
+    "route": "Warsaw → Berlin",
+    "departure_time": "2026-09-12T18:00:00Z",
+    "arrival_time": "2026-09-12T21:00:00Z"
+  },
   "tickets_count": 2,
   "status": "confirmed",
   "created_at": "2026-08-25T18:00:00Z"
 }
 ```
 
-### Staff list item
+Regular passengers do not receive an owner field because every returned order
+already belongs to the authenticated passenger.
 
-Staff receive the owner email in addition to the normal list fields:
+### Staff list item
 
 ```json
 {
   "id": "order-uuid",
+  "flight": {
+    "id": "flight-uuid",
+    "route": "Warsaw → Berlin",
+    "departure_time": "2026-09-12T18:00:00Z",
+    "arrival_time": "2026-09-12T21:00:00Z"
+  },
   "tickets_count": 2,
-  "status": "confirmed",
+  "status": "cancelled",
   "created_at": "2026-08-25T18:00:00Z",
   "user": "passenger6@example.com"
 }
 ```
 
+Staff users and superusers additionally receive the order owner's email.
+
 <table>
+<tr>
+<th>Passenger list item</th>
+<th>Staff list item</th>
+</tr>
 <tr>
 <td><img src="docs/screenshots/order-list-regular-user.png" alt="Passenger order list"></td>
 <td><img src="docs/screenshots/order-list-staff.png" alt="Staff order list"></td>
@@ -3044,37 +3049,47 @@ Staff receive the owner email in addition to the normal list fields:
 
 ## Detail response
 
-Order detail expands every ticket and, inside each ticket, expands `flight` using
-the flight list representation. This gives the client flight context without a
-separate request for every ticket.
+Because every ticket in an order belongs to the same flight, the detail response
+returns the flight once at the order level instead of repeating identical flight
+data inside every ticket.
+
+The `tickets` array therefore contains only ticket-specific information:
+ticket ID, row, seat and status.
 
 ### Passenger detail
 
 ```json
 {
   "id": "order-uuid",
+  "flight": {
+    "id": "flight-uuid",
+    "source": "Warsaw",
+    "destination": "Berlin",
+    "airplane": "Continental Express UR-007",
+    "airplane_type": "Airbus A321neo",
+    "crew": [
+      "Benjamin Lewis",
+      "Charlotte Walker",
+      "Lucas Hall"
+    ],
+    "departure_time": "2026-09-12T18:00:00Z",
+    "arrival_time": "2026-09-12T21:00:00Z",
+    "status": "scheduled",
+    "current_state": "scheduled",
+    "flight_duration": "03:00:00",
+    "available_seats": 117
+  },
   "tickets": [
     {
-      "id": "ticket-uuid",
+      "id": "ticket-uuid-1",
       "row": 1,
-      "seat": 5,
-      "flight": {
-        "id": "flight-uuid",
-        "source": "Warsaw",
-        "destination": "Berlin",
-        "airplane": "Continental Express UR-007",
-        "airplane_type": "Airbus A321neo",
-        "crew": [
-          "Benjamin Lewis",
-          "Charlotte Walker",
-          "Lucas Hall"
-        ],
-        "departure_time": "2026-09-12T18:00:00Z",
-        "arrival_time": "2026-09-12T21:00:00Z",
-        "status": "scheduled",
-        "current_state": "scheduled",
-        "flight_duration": "03:00:00"
-      },
+      "seat": 1,
+      "status": "active"
+    },
+    {
+      "id": "ticket-uuid-2",
+      "row": 1,
+      "seat": 2,
       "status": "active"
     }
   ],
@@ -3085,33 +3100,41 @@ separate request for every ticket.
 
 ### Staff detail
 
-For staff, the same detail representation additionally exposes the order owner:
+Staff users and superusers receive the same booking information together with
+the order owner:
 
 ```json
 {
   "id": "order-uuid",
+  "flight": {
+    "id": "flight-uuid",
+    "source": "Warsaw",
+    "destination": "Berlin",
+    "airplane": "Continental Express UR-007",
+    "airplane_type": "Airbus A321neo",
+    "crew": [
+      "Benjamin Lewis",
+      "Charlotte Walker",
+      "Lucas Hall"
+    ],
+    "departure_time": "2026-09-12T18:00:00Z",
+    "arrival_time": "2026-09-12T21:00:00Z",
+    "status": "scheduled",
+    "current_state": "scheduled",
+    "flight_duration": "03:00:00",
+    "available_seats": 117
+  },
   "tickets": [
     {
-      "id": "ticket-uuid",
+      "id": "ticket-uuid-1",
       "row": 1,
       "seat": 1,
-      "flight": {
-        "id": "flight-uuid",
-        "source": "Warsaw",
-        "destination": "Berlin",
-        "airplane": "Continental Express UR-007",
-        "airplane_type": "Airbus A321neo",
-        "crew": [
-          "Benjamin Lewis",
-          "Charlotte Walker",
-          "Lucas Hall"
-        ],
-        "departure_time": "2026-09-12T18:00:00Z",
-        "arrival_time": "2026-09-12T21:00:00Z",
-        "status": "scheduled",
-        "current_state": "scheduled",
-        "flight_duration": "03:00:00"
-      },
+      "status": "active"
+    },
+    {
+      "id": "ticket-uuid-2",
+      "row": 1,
+      "seat": 2,
       "status": "active"
     }
   ],
@@ -3125,26 +3148,19 @@ For staff, the same detail representation additionally exposes the order owner:
 }
 ```
 
-The nested flight contains both the persisted `status` and calculated
-`current_state`, together with airplane type, crew, schedule and calculated flight
-duration.
-
 #### Regular passenger detail
 
-The passenger response contains order and ticket information but does not expose
-an owner field:
+The regular passenger response contains the shared flight information once and
+the passenger's ticket-specific seat data:
 
-<table>
-<tr>
-<td><img src="docs/screenshots/order-detail-regular-user1.png" alt="Regular user order detail first part"></td>
-<td><img src="docs/screenshots/order-detail-regular-user2.png" alt="Regular user order detail second part"></td>
-</tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/order-detail-regular-user.png" width="900" alt="Regular user order detail">
+</p>
 
 #### Staff detail
 
-The staff response contains the same booking information and additionally exposes
-the nested order owner data:
+The staff response contains the same flight and ticket information and
+additionally exposes the nested order owner data:
 
 <table>
 <tr>
@@ -3169,10 +3185,13 @@ Response:
 }
 ```
 
-Cancellation is rejected if the order is already cancelled or if cancellation is
-no longer valid because an active non-cancelled flight has departed.
+Cancellation is rejected if the order is already cancelled or if an active
+ticket belongs to a non-cancelled flight that has already departed.
 
-Flight cancellation also propagates to related orders and tickets.
+When an order is cancelled, all of its tickets are also changed to `cancelled`.
+
+Flight cancellation can also propagate cancellation to related orders and
+tickets.
 
 ## Order errors
 
@@ -3183,15 +3202,15 @@ Flight cancellation also propagates to related orders and tickets.
 | `400` | `tickets` | Tickets belong to different flights |
 | `400` | `tickets` | Same seat appears twice in one request |
 | `400` | `tickets` | Active seat is already booked |
-| `400` | nested ticket field | Row/seat is outside airplane layout |
-| `400` | `flight` | Flight is cancelled |
-| `400` | `flight` | Flight has departed |
+| `400` | nested ticket field | Row or seat is outside the airplane layout |
+| `400` | `flight` | Ticket purchase attempted for a cancelled or departed flight |
+| `400` | `flight` | Invalid or nonexistent flight supplied to the order filter |
 | `400` | `detail` | Order is already cancelled |
-| `400` | `detail` | Cancellation attempted after relevant flight departure |
-| `401` | — | User is not authenticated |
-| `404` | — | Order does not exist or belongs to another passenger |
+| `400` | `detail` | Cancellation attempted after flight departure |
+| `401` | — | Authentication is required |
+| `404` | — | Order does not exist or is not visible to the current passenger |
 
-Important messages include:
+Examples:
 
 ```json
 {
@@ -3211,12 +3230,19 @@ Important messages include:
 
 ```json
 {
+  "flight": [
+    "Flight with ID 'flight-uuid' was not found."
+  ]
+}
+```
+
+```json
+{
   "detail": [
     "Order cannot be cancelled after flight departure."
   ]
 }
 ```
-
 
 ---
 
@@ -3224,24 +3250,30 @@ Important messages include:
 
 There is intentionally no standalone ticket ViewSet.
 
-Tickets are created inside an order so the API can validate the complete booking
-before anything is committed. The booking operation can therefore validate the
-flight, all requested seat coordinates, duplicate seats, existing active
-reservations and the order-wide ticket rules as one unit.
+Tickets are created only as part of an order. This allows the API to validate
+the complete booking before anything is written to the database, including the
+selected flight, seat coordinates, duplicate seats, existing reservations and
+order-level booking rules.
 
 ## Ticket schema
 
 | Field | Type | Read-only | Notes |
 |---|---|---:|---|
 | `id` | UUID | Yes | Generated automatically |
-| `flight` | UUID on input / nested flight in order detail | No | Required during order creation |
+| `flight` | UUID | No | Required during order creation |
 | `row` | integer | No | Must exist on the selected airplane |
 | `seat` | integer | No | Must exist within the selected row |
 | `status` | `active` / `cancelled` | Yes | Managed by booking and cancellation lifecycle operations |
 
+The ticket has two API representations depending on context:
+
+- during order creation, `flight` is supplied and returned as a UUID;
+- inside order detail, shared flight information is moved to the order level and
+  each ticket contains only ticket-specific fields.
+
 ## Input representation
 
-A ticket is supplied as part of an order request:
+A ticket is provided inside the `tickets` list when creating an order:
 
 ```json
 {
@@ -3253,10 +3285,12 @@ A ticket is supplied as part of an order request:
 
 The client does not provide `id` or `status`.
 
+All tickets in the same order must reference the same flight.
+
 ## Response representation after order creation
 
-Immediately after creation, the ticket uses the write-oriented representation,
-so `flight` is represented by its UUID:
+After successful order creation, each ticket uses the write-oriented
+representation and the related flight is returned as its UUID:
 
 ```json
 {
@@ -3276,14 +3310,23 @@ When an order is retrieved through:
 GET /api/airport/orders/{id}/
 ```
 
-the ticket is represented by the read serializer and `flight` is expanded using
-the flight list representation:
+the flight is returned once at the order level. Each ticket therefore contains
+only its own ID, seat coordinates and lifecycle status:
 
 ```json
 {
   "id": "ticket-uuid",
   "row": 1,
-  "seat": 5,
+  "seat": 2,
+  "status": "active"
+}
+```
+
+Example order structure:
+
+```json
+{
+  "id": "order-uuid",
   "flight": {
     "id": "flight-uuid",
     "source": "Warsaw",
@@ -3299,14 +3342,30 @@ the flight list representation:
     "arrival_time": "2026-09-12T21:00:00Z",
     "status": "scheduled",
     "current_state": "scheduled",
-    "flight_duration": "03:00:00"
+    "flight_duration": "03:00:00",
+    "available_seats": 117
   },
-  "status": "active"
+  "tickets": [
+    {
+      "id": "ticket-uuid-1",
+      "row": 1,
+      "seat": 1,
+      "status": "active"
+    },
+    {
+      "id": "ticket-uuid-2",
+      "row": 1,
+      "seat": 2,
+      "status": "active"
+    }
+  ]
 }
 ```
 
-This difference is intentional: order creation accepts compact identifiers,
-while order detail returns richer flight context for already-created tickets.
+This avoids repeating identical flight information for every ticket in the same
+order while preserving the full flight context for the booking.
+
+The order list uses a separate compact flight summary at the order level.
 
 ---
 
@@ -3554,12 +3613,12 @@ The suite includes boundary and business scenarios such as:
 
 ## Current verified result
 
-The current complete Docker run executes **854 tests** successfully:
+The current complete Docker run executes **863 tests** successfully:
 
 ```text
-Found 854 test(s).
+Found 863 test(s).
 
-Ran 854 tests in 23.997s
+Ran 863 tests in 23.829s
 
 OK
 ```
@@ -3570,7 +3629,7 @@ source:
 ```text
 Name     Stmts   Miss   Cover   Missing
 ----------------------------------------
-TOTAL     1096      0    100%
+TOTAL     1125      0    100%
 
 16 files skipped due to complete coverage.
 ```
@@ -3641,8 +3700,8 @@ htmlcov/index.html
 
 ### Coverage screenshots
 
-The screenshots below correspond to the current verified run: 854 passing tests,
-1096 measured statements, 0 missed statements and 100% coverage. Because
+The screenshots below correspond to the current verified run: 863 passing tests,
+1125 measured statements, 0 missed statements and 100% coverage. Because
 `skip_covered = True`, the HTML index may show no individual files when every
 measured file is fully covered; that is expected.
 
