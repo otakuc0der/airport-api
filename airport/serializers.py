@@ -522,10 +522,6 @@ class TicketSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class TicketListSerializer(TicketSerializer):
-    flight = FlightListSerializer(read_only=True)
-
-
 MAX_TICKETS_PER_ORDER = config(
     "MAX_TICKETS_PER_ORDER",
     default=3,
@@ -642,14 +638,34 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class OrderListSerializer(OrderSerializer):
     tickets_count = serializers.IntegerField(read_only=True)
+    flight = serializers.SerializerMethodField()
 
     class Meta(OrderSerializer.Meta):
         fields = [
             "id",
+            "flight",
             "tickets_count",
             "status",
             "created_at",
         ]
+
+    def get_flight(self, obj: Order) -> dict[str, Any] | None:
+        tickets = list(obj.tickets.all())
+
+        if not tickets:
+            return None
+
+        flight = tickets[0].flight
+
+        return {
+            "id": str(flight.id),
+            "route": (
+                f"{flight.route.source.closest_big_city.name} → "
+                f"{flight.route.destination.closest_big_city.name}"
+            ),
+            "departure_time": flight.departure_time,
+            "arrival_time": flight.arrival_time,
+        }
 
 
 class OrderStaffListSerializer(OrderListSerializer):
@@ -664,8 +680,20 @@ class OrderStaffListSerializer(OrderListSerializer):
         ]
 
 
+class OrderTicketSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ticket
+        fields = [
+            "id",
+            "row",
+            "seat",
+            "status"
+        ]
+
+
 class OrderDetailSerializer(OrderSerializer):
-    tickets = TicketListSerializer(
+    flight = serializers.SerializerMethodField()
+    tickets = OrderTicketSerializer(
         many=True,
         read_only=True,
     )
@@ -673,10 +701,22 @@ class OrderDetailSerializer(OrderSerializer):
     class Meta(OrderSerializer.Meta):
         fields = [
             "id",
+            "flight",
             "tickets",
             "status",
             "created_at",
         ]
+
+    def get_flight(self, obj: Order) -> dict | None:
+        tickets = list(obj.tickets.all())
+
+        if not tickets:
+            return None
+
+        return FlightListSerializer(
+            tickets[0].flight,
+            context=self.context,
+        ).data
 
 
 class OrderUserSerializer(serializers.ModelSerializer):

@@ -1,7 +1,10 @@
+from uuid import UUID
+
 from django.contrib.auth import get_user_model
 from django.db.models import QuerySet
 from django.forms import IntegerField
 from django_filters import rest_framework as filters
+from rest_framework.exceptions import ValidationError
 
 from airport.models import (
     Airplane,
@@ -395,6 +398,33 @@ class OrderFilter(filters.FilterSet):
         lookup_expr="date__lte",
         label="Created to date",
     )
+
+    flight = filters.UUIDFilter(
+        method="filter_flight",
+        label="Tickets flight ID",
+    )
+
+    def filter_flight(
+        self,
+        queryset: QuerySet[Order],
+        name: str,
+        value: UUID | None,
+    ) -> QuerySet[Order]:
+        if value is None:
+            return queryset
+
+        if not Flight.objects.filter(pk=value).exists():
+            raise ValidationError(
+                {
+                    "flight": [
+                        f"Flight with ID '{value}' was not found."
+                    ]
+                }
+            )
+
+        return queryset.filter(
+            tickets__flight_id=value,
+        ).distinct()
 
     class Meta:
         model = Order
